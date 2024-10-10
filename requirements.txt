@@ -1,6 +1,7 @@
 appnope==0.1.4
 asttokens==2.4.1
 attrs==24.2.0
+bottle==0.13.1
 certifi==2024.8.30
 charset-normalizer==3.4.0
 comm==0.2.2
@@ -9,34 +10,48 @@ debugpy==1.8.6
 decorator==5.1.1
 exceptiongroup==1.2.2
 executing==2.1.0
+greenlet==3.1.1
 humanize==4.11.0
 idna==3.10
 imageio==2.35.1
 ipykernel==6.29.5
 ipython==8.28.0
+ipywidgets==8.1.5
 jedi==0.19.1
 joblib==1.4.2
 jupyter_client==8.6.3
 jupyter_core==5.7.2
+jupyterlab_widgets==3.0.13
+lightweight_charts @ git+https://github.com/drew2323/lightweight-charts-python.git@a9cb8da66e8e897c1d304e61b47354cdfe98a3fa
 llvmlite==0.39.1
 matplotlib-inline==0.1.7
 mypy-extensions==1.0.0
 nest-asyncio==1.6.0
 numba==0.56.4
 numpy==1.23.5
+orjson==3.10.7
 packaging==24.1
 pandas==2.2.3
 parso==0.8.4
 pexpect==4.9.0
 pillow==10.4.0
 platformdirs==4.3.6
+plotly==5.24.1
 prompt_toolkit==3.0.48
+proxy-tools==0.1.0
 psutil==6.0.0
+psycopg2-binary==2.9.9
 ptyprocess==0.7.0
 pure_eval==0.2.3
 Pygments==2.18.0
+pyobjc-core==10.3.1
+pyobjc-framework-Cocoa==10.3.1
+pyobjc-framework-Quartz==10.3.1
+pyobjc-framework-Security==10.3.1
+pyobjc-framework-WebKit==10.3.1
 python-dateutil==2.9.0.post0
 pytz==2024.2
+pywebview==5.2
 pyzmq==26.2.0
 regex==2024.9.11
 requests==2.32.3
@@ -44,8 +59,11 @@ schedule==1.2.2
 scikit-learn==1.5.2
 scipy==1.14.1
 six==1.16.0
+SQLAlchemy==2.0.35
 stack-data==0.6.3
+stratlab_db @ git+https://gitea.stratlab.dev/Stratlab/db.git@62743dcfe4336fd0ffd0f6706779fa5f181a7d91
 TA-Lib==0.4.32
+tenacity==9.0.0
 threadpoolctl==3.5.0
 tomli==2.0.2
 tornado==6.4.1
@@ -59,3 +77,4 @@ urllib3==2.2.3
 vectorbtpro @ file:///Users/davidbrazda/Downloads/vectorbtpro-2024.6.19-py3-none-any.whl#sha256=5e202f62aeb7697bb1411302e1c062d1df4fed5de5e1c2e8867eac07263c2d4a
 wcwidth==0.2.13
 websocket-client==1.8.0
+widgetsnbextension==4.0.13

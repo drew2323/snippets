@@ -1,5 +1,5 @@
 import vectorbtpro as vbt
-import lightweightcharts
+from lightweight_charts import Panel, chart, PlotDFAccessor, PlotSRAccessor
 
 #region DATA
  #fetching from remote db
