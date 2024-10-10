@@ -107,6 +107,46 @@ t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
 
 #endregion
 
+#region GROUPING - SPLITTING
+
+#SPLITTER - splitting wrapper based on index
+#http://5.161.179.223:8000/vbt-doc/tutorials/cross-validation/splitter/index.html#anchored
+daily_splitter = vbt.Splitter.from_grouper(t1data.index, "D", split=None) #DOES contain last DAY
+
+daily_splitter = vbt.Splitter.from_ranges( #doesnt contain last DY
+    t1data.index,
+    every="D",  
+    split=None
+)
+daily_splitter.stats()
+daily_splitter.plot()
+daily_splitter.coverage()
+
+#TAKING and APPLY MANUALLY - run UDF on ALL takes and concatenates
+taken = daily_splitter.take(t1data)
+inds = []
+for series in taken:
+    mom = vbt.indicator("talib:MOM").run(series.close, timeperiod=10, skipna=True)
+    inds.append(mom)
+mom_daily = vbt.base.merging.row_stack_merge(inds) #merge
+mom = vbt.indicator("talib:MOM").run(t1data.close, timeperiod=10, skipna=True)
+t1data.ohlcv.data["BAC"].lw.plot(left=[(mom_daily, "daily_splitter"),(mom, "original mom")]) #OHLCV with indicators on top
+
+#TAKING and APPLY AUTOMATIC
+def indi_run(sr):
+    return vbt.indicator("talib:MOM").run(sr.close, timeperiod=10, skipna=True)
+
+res = daily_splitter.apply(indi_run, vbt.Takeable(sr), merge_func="row_stack", freq="1T") 
+
+
+
+
+#PANDAS GROUPING - series/df grouping resulting in GroupBySeries placeholder that can be aggregated(sum, mean), transformed iterated over or fitlered
+for name, group in t1data.data["BAC"].close.groupby(pd.Grouper(freq='D')):
+    print(name, group)
+
+
+#endregion
 
 #region CHARTING
 
