@@ -174,7 +174,13 @@ mom = vbt.indicator("talib:MOM").run(t1data.data["BAC"].close, timeperiod=10, sk
 #macd = vbt.indicator("talib:MACD").run(t1data.data["BAC"].close) #, timeframe=["1T"]) #, 
 t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
 
-
+#REGISTER CUSTOM INDICATOR
+vbt.IndicatorFactory.register_custom_indicator(
+    SupportResistance,
+    name="SUPPRES",
+    location=None,
+    if_exists='raise'
+)
 
 #endregion
 
