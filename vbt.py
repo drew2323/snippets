@@ -14,9 +14,12 @@ basic_data = con.pull(symbols=[SYMBOL], schema=SCHEMA,start="2024-08-01", end="2
 
 #region DISCOVERY
 #get parameters of method
+vbt.IF.list_locations() #lists categories
+vbt.IF.list_indicators(pattern="vbt") #all in category vbt
+vbt.IF.list_indicators("*sma")
 vbt.phelp(vbt.indicator("talib:MOM").run)
 
-vbt.IF.list_indicators("*sma")
+
 
 #endregion
 
@@ -143,36 +146,7 @@ SignalContaxt (contains various metrics)
 #endregion
 
 
-#region INDICATORS
-#anchored VWAP
-t1vwap_h = vbt.VWAP.run(t1data.high, t1data.low, t1data.close, t1data.volume, anchor="H")
-t1vwap_d = vbt.VWAP.run(t1data.high, t1data.low, t1data.close, t1data.volume, anchor="D")
-t1vwap_t = vbt.VWAP.run(t1data.high, t1data.low, t1data.close, t1data.volume, anchor="T")
-
-t1vwap_h_real = t1vwap_h.vwap.vbt.realign_closing(resampler_s)
-t1vwap_d_real = t1vwap_d.vwap.vbt.realign_closing(resampler_s)
-t1vwap_t_real = t1vwap_t.vwap.vbt.realign_closing(resampler_s)
-
-#BBANDS = vbt.indicator("pandas_ta:BBANDS")
-mom_anch_d = AnchoredIndicator("talib:MOM", anchor='30min').run(t1data.data["BAC"].close, timeperiod=10)
-mom = vbt.indicator("talib:MOM").run(t1data.data["BAC"].close, timeperiod=10, skipna=True)
-#macd = vbt.indicator("talib:MACD").run(t1data.data["BAC"].close) #, timeframe=["1T"]) #, 
-t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
-
-#SMA - note for TALIB use skipna=True
-mom_multi_beztf = vbt.indicator("talib:MOM").run(t1data.close, timeperiod=5, skipna=True)
-
-#TALIB INDICATORS can do realing closing : timeframe=["1T"]
-mom_multi = vbt.indicator("talib:MOM").run(t1data.close, timeperiod=5, timeframe=["1T","5T"], skipna=True) #returned 5T can be directly compared with 1T
-
-#ANCHORED indciators vbt.indicator("pandas_ta:BBANDS") is called AnchoredIndicator("pandas_ta:BBANDS")
-from ttools import AnchoredIndicator
-
-#BBANDS = vbt.indicator("pandas_ta:BBANDS")
-mom_anch_d = AnchoredIndicator("talib:MOM", anchor='30min').run(t1data.data["BAC"].close, timeperiod=10)
-mom = vbt.indicator("talib:MOM").run(t1data.data["BAC"].close, timeperiod=10, skipna=True)
-#macd = vbt.indicator("talib:MACD").run(t1data.data["BAC"].close) #, timeframe=["1T"]) #, 
-t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
+#region INDICATORS DEV
 
 #REGISTER CUSTOM INDICATOR
 vbt.IndicatorFactory.register_custom_indicator(
@@ -181,6 +155,67 @@ vbt.IndicatorFactory.register_custom_indicator(
     location=None,
     if_exists='raise'
 )
+
+#RUN INDICATOR on DATA WRAPPER
+cdlbreakaway = s1data.run(vbt.indicator("talib:CDLHAMMER"), skipna=True, timeframe=["12s"])
+
+#FROM EXPRESSION http://5.161.179.223:8000/vbt-doc/api/indicators/factory/#vectorbtpro.indicators.factory.IndicatorFactory.from_expr
+WMA = vbt.IF(
+    class_name='WMA',
+    input_names=['close'],
+    param_names=['window'],
+    output_names=['wma']
+).from_expr("wm_mean_nb(close, window)")
+
+wma = WMA.run(t1data.close, window=10)
+wma.wma
+
+
+#endregion
+
+
+#region FAV INDICATORS 
+#for TALIB indicator always use skipna=True
+
+#TALIB INDICATORS can do realing closing : timeframe=["1T"]
+mom_multi = vbt.indicator("talib:MOM").run(t1data.close, timeperiod=5, timeframe=["1T","5T"], skipna=True) #returned 5T can be directly compared with 1T
+
+#ANCHORED indciators vbt.indicator("talib:MOM") becomes AnchoredIndicator("talib:MOM", anchor="D") - freq of pd.Grouper
+from ttools import AnchoredIndicator
+mom_anch_d = AnchoredIndicator("talib:MOM", anchor='30min').run(t1data.data["BAC"].close, timeperiod=10)
+mom = vbt.indicator("talib:MOM").run(t1data.data["BAC"].close, timeperiod=10, skipna=True)
+t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
+
+#FIBO RETRACEMENT
+fibo = vbt.indicator("technical:FIBONACCI_RETRACEMENTS").run(t1data.close, skipna=True)
+#fibo.fibonacci_retracements
+
+fibo_plusclose = t1data.close + fibo.fibonacci_retracements
+fibo_minusclose = t1data.close - fibo.fibonacci_retracements
+#fibo_plusclose
+Panel(
+            auto_scale=[fibo_plusclose["BAC"]],
+            ohlcv=(t1data.ohlcv.data["BAC"],),
+            histogram=[],
+            right=[(fibo_plusclose["BAC"],),(fibo_minusclose["BAC"],)],
+            left=[],
+            middle1=[(fibo.fibonacci_retracements["BAC"],"fibonacci_retracements")],
+            middle2=[]
+            ).chart(size="xs")
+
+#CHOPINESS indicator
+chopiness = vbt.indicator("technical:CHOPINESS").run(s1data.open, s1data.high, s1data.low, s1data.close, t1data.volume, skipna=True)
+s1data.ohlcv.data["BAC"].lw.plot(auto_scale=[chopiness])
+
+#anchored VWAP
+t1vwap_h = vbt.VWAP.run(t1data.high, t1data.low, t1data.close, t1data.volume, anchor="H")
+t1vwap_h_real = t1vwap_h.vwap.vbt.realign_closing(resampler_s)
+
+#BBANDS = vbt.indicator("pandas_ta:BBANDS")
+mom_anch_d = AnchoredIndicator("talib:MOM", anchor='30min').run(t1data.data["BAC"].close, timeperiod=10)
+mom = vbt.indicator("talib:MOM").run(t1data.data["BAC"].close, timeperiod=10, skipna=True)
+#macd = vbt.indicator("talib:MACD").run(t1data.data["BAC"].close) #, timeframe=["1T"]) #, 
+t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
 
 #endregion
 
@@ -242,7 +277,18 @@ t5data.ohlcv.data["BAC"].lw.plot(
     right=[(t1data.data["BAC"].close, "t1 close"),(t5data.data["BAC"].close, "t5 close")],
     size="s") #.loc[:,(20,"1T","BAC")]
 
-#PANEL
+#SINGLE PANEL
+Panel(
+            auto_scale=[cdlbreakaway],
+            ohlcv=(t1data.ohlcv.data["BAC"],entries),
+            histogram=[],
+            right=[],
+            left=[],
+            middle1=[],
+            middle2=[]
+            ).chart(size="xs")
+
+#MULTI PANEL
 pane1 = Panel(
     #auto_scale=[mom_multi, mom_multi_1t],
     #ohlcv=(t1data.data["BAC"],),  #(series, entries, exits, other_markers)
@@ -254,9 +300,9 @@ pane1 = Panel(
     #xloc="2024-02-12 09:30",
     precision=3
 )
+pane2 = Panel(....)
 
-ch = chart([pane1], size="s")
-
+ch = chart([pane1, pane2], size="s")
 
 
 #endregion
@@ -278,6 +324,8 @@ pf_join = vbt.PF.column_stack((pf1, pf2), group_by=True)
 
 
 #region ANALYSIS
+#ROBUSTNESS
+pf_stats.sort_values(by='Sharpe Ratio', ascending=False).iloc[::-1].vbt.heatmap().show() #works when there are more metrics
 
 
 #endregion
