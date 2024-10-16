@@ -1,4 +1,5 @@
 - [FETCHING DATA](#fetching-data)
+  - [REINDEX to main session](#reindex-to-main-session)
 - [DISCOVERY](#discovery)
 - [DATA/WRAPPER](#datawrapper)
   - [create WRAPPER manually](#create-wrapper-manually)
@@ -10,8 +11,9 @@
   - [ENTRIES/EXITS time based](#entriesexits-time-based)
   - [STOPS](#stops)
   - [OHLCSTX module](#ohlcstx-module)
-  - [WINDOW OPEN/CLOSE](#window-openclose)
+  - [ENTRY WINDOW and FORCED EXIT WINDOW](#entry-window-and-forced-exit-window)
   - [END OF DAY EXITS](#end-of-day-exits)
+  - [REGULAR EXITS](#regular-exits)
 - [DF/SR ACCESSORS](#dfsr-accessors)
   - [Generic](#generic)
   - [SIGNAL ACCESSORS](#signal-accessors)
@@ -62,6 +64,36 @@ basic_data = con.pull(symbols=[SYMBOL], schema=SCHEMA,start="2024-08-01", end="2
 #Fetching from YAHOO
 symbols = ["AAPL", "MSFT", "AMZN", "TSLA", "AMD", "NVDA", "SPY", "QQQ", "META", "GOOG"]
 data = vbt.YFData.pull(symbols, start="2024-09-28", end="now", timeframe="1H", missing_columns="nan")
+
+#Fetching Trades and Aggregating custom OHLCV
+TBD
+```
+
+## REINDEX to main session
+Get trading days main sessions from `pandas_market_calendars` and reindex fetched data to main session only. 
+```python
+import vectorbtpro as vbt
+
+# Start and end dates to use across both the calendar and data fetch
+start=data.index[0].to_pydatetime()
+end=tata.index[-1].to_pydatetime()
+timeframe="1m"
+
+import pandas_market_calendars as mcal
+# Get the NYSE calendar
+nyse = mcal.get_calendar("NYSE")
+# Get the market hours data
+market_hours = nyse.schedule(start_date=start, end_date=end, tz=nyse.tz)
+#market_hours = market_hours.tz_localize(nyse.tz)
+# Create a DatetimeIndex at our desired frequency for that schedule. Because the calendar hands back the end of
+# the window, you need to subtract that size timeframe to get back to the start
+market_klines = mcal.date_range(market_hours, frequency=timeframe) - pd.Timedelta(timeframe)
+
+testData = vbt.YFData.fetch(['MSFT'], start=start, end=end, timeframe=timeframe, tz_convert="US/Eastern")
+# Finally, take our DatetimeIndex and use that to pull just the data we're interested in (and ensuring we have rows
+# for any empty klines in there, which helps for some time based algorithms that need to have time not exist outside
+# of market hours)
+testData = testData.transform(lambda x: x.reindex(market_klines))
 ```
 
 # DISCOVERY
@@ -241,12 +273,32 @@ price[exits] = exit_price
 [doc](ttp://5.161.179.223:8000/vbt-doc/api/signals/generators/ohlcstx/index.html)
 
 
-## WINDOW OPEN/CLOSE
+## ENTRY WINDOW and FORCED EXIT WINDOW
+Applying `entry window `range (denoted by minutes from the session start) to `entries` and applying `forced exit window` to `exits`.
 
+```python
+from ttools import create_mask_from_window
 
+entry_window_opens = 3 #in minutes from start of the market
+entry_window_closes = 388
+forced_exit_start = 387
+forced_exit_end = 390
 
+#create mask based on main session that day
+entry_window_opened = create_mask_from_window(entries, entry_window_opens, entry_window_closes)
+#limit entries to the window
+entries = entries & entry_window_opened
+
+#create forced exits mask
+forced_exits_window = create_mask_from_window(exits, forced_exit_start, forced_exit_end)
+
+#add forced_exits to exits
+exits = exits | forced_exits_window
+```
 
 ## END OF DAY EXITS
+Another way of eod exits according to number of bars at the end of the session. Assuming the last rows each day represents end of the market.
+
 ```python
 sr = t1data.data["BAC"]
 last_n_daily_rows = sr.groupby(sr.index.date).tail(4) #or N last rows
@@ -257,7 +309,10 @@ exits = t1data.get_symbol_wrapper().fill(False)
 exits.loc[last_n_daily_rows.index] = True
 #visualize
 t1data.ohlcv.data["BAC"].lw.plot(right=[(t1data.close,"close",exits)], size="s")
-
+```
+## REGULAR EXITS
+Time based.
+```python
 #REGULAR EXITS -EVERY HOUR/D/WEEK exits
 exits.vbt.set(
     True, 
