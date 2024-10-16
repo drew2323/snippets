@@ -276,6 +276,8 @@ price[exits] = exit_price
 ## ENTRY WINDOW and FORCED EXIT WINDOW
 Applying `entry window `range (denoted by minutes from the session start) to `entries` and applying `forced exit window` to `exits`.
 
+`create_mask_from_window` with param `use_cal=True` (default) uses market calendar data for each day to denote session start and end. When disabled it uses just fixed 9:30-16:00 for each day.
+
 ```python
 from ttools import create_mask_from_window
 
