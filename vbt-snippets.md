@@ -1,5 +1,6 @@
 - [FETCHING DATA](#fetching-data)
   - [REINDEX to main session](#reindex-to-main-session)
+  - [indexing](#indexing)
 - [DISCOVERY](#discovery)
 - [DATA/WRAPPER](#datawrapper)
   - [create WRAPPER manually](#create-wrapper-manually)
@@ -10,8 +11,8 @@
 - [SIGNALS](#signals)
   - [ENTRIES/EXITS time based](#entriesexits-time-based)
   - [STOPS](#stops)
-  - [OHLCSTX module](#ohlcstx-module)
-  - [ENTRY WINDOW and FORCED EXIT WINDOW](#entry-window-and-forced-exit-window)
+  - [OHLCSTX Module](#ohlcstx-module)
+  - [Entry Window and Forced Exit Window](#entry-window-and-forced-exit-window)
   - [END OF DAY EXITS](#end-of-day-exits)
   - [REGULAR EXITS](#regular-exits)
 - [DF/SR ACCESSORS](#dfsr-accessors)
@@ -95,7 +96,10 @@ testData = vbt.YFData.fetch(['MSFT'], start=start, end=end, timeframe=timeframe,
 # of market hours)
 testData = testData.transform(lambda x: x.reindex(market_klines))
 ```
-
+## indexing
+```python
+entries.vbt.xloc[slice("2024-08-01","2024-08-03")].obj.info()
+```
 # DISCOVERY
 
 ```python
@@ -268,12 +272,12 @@ price = close.vbt.wrapper.fill()
 price[entries] = entry_price
 price[exits] = exit_price
 
-## OHLCSTX module
+## OHLCSTX Module
  - exit signal generator based on price and stop values
 [doc](ttp://5.161.179.223:8000/vbt-doc/api/signals/generators/ohlcstx/index.html)
 
 
-## ENTRY WINDOW and FORCED EXIT WINDOW
+## Entry Window and Forced Exit Window
 Applying `entry window `range (denoted by minutes from the session start) to `entries` and applying `forced exit window` to `exits`.
 
 `create_mask_from_window` with param `use_cal=True` (default) uses market calendar data for each day to denote session start and end. When disabled it uses just fixed 9:30-16:00 for each day.
@@ -287,12 +291,12 @@ forced_exit_start = 387
 forced_exit_end = 390
 
 #create mask based on main session that day
-entry_window_opened = create_mask_from_window(entries, entry_window_opens, entry_window_closes)
+entry_window_opened = create_mask_from_window(entries, entry_window_opens, entry_window_closes, use_cal=True)
 #limit entries to the window
 entries = entries & entry_window_opened
 
 #create forced exits mask
-forced_exits_window = create_mask_from_window(exits, forced_exit_start, forced_exit_end)
+forced_exits_window = create_mask_from_window(exits, forced_exit_start, forced_exit_end, use_cal=True)
 
 #add forced_exits to exits
 exits = exits | forced_exits_window
