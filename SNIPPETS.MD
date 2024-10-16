@@ -1,3 +1,39 @@
+- [FETCHING DATA](#fetching-data)
+- [DISCOVERY](#discovery)
+- [DATA/WRAPPER](#datawrapper)
+  - [create WRAPPER manually](#create-wrapper-manually)
+- [RESAMPLING](#resampling)
+  - [config](#config)
+- [REALIGN](#realign)
+  - [REALIGN\_CLOSING accessors](#realign_closing-accessors)
+- [SIGNALS](#signals)
+  - [ENTRIES/EXITS time based](#entriesexits-time-based)
+  - [STOPS](#stops)
+  - [OHLCSTX modul](#ohlcstx-modul)
+  - [WINDOW OPEN/CLOSE](#window-openclose)
+  - [END OF DAY EXITS](#end-of-day-exits)
+- [DF/SR ACCESSORS](#dfsr-accessors)
+  - [Generic](#generic)
+  - [SIGNAL ACCESSORS](#signal-accessors)
+  - [RANKING - partitioning](#ranking---partitioning)
+  - [Base Accessors](#base-accessors)
+- [Stoploss/Takeprofit](#stoplosstakeprofit)
+  - [SL - ATR based](#sl---atr-based)
+  - [EXIT after time](#exit-after-time)
+  - [CALLBACKS -](#callbacks--)
+    - [MEMORY](#memory)
+- [INDICATORS DEV](#indicators-dev)
+- [FAV INDICATORS](#fav-indicators)
+- [GROUPING - SPLITTING](#grouping---splitting)
+- [CHARTING](#charting)
+- [MULTIACCOUNT](#multiaccount)
+- [CUSTOM SIMULATION](#custom-simulation)
+- [ANALYSIS](#analysis)
+  - [ROBUSTNESS](#robustness)
+- [UTILS](#utils)
+
+
+```python
 import vectorbtpro as vbt
 from lightweight_charts import Panel, chart, PlotDFAccessor, PlotSRAccessor
 t15data = None
@@ -7,6 +43,7 @@ if not hasattr(pd.Series, 'lw'):
 
 if not hasattr(pd.DataFrame, 'lw'):
     pd.api.extensions.register_dataframe_accessor("lw")(PlotDFAccessor)
+```
 
 
 # FETCHING DATA
@@ -27,15 +64,13 @@ data = vbt.YFData.pull(symbols, start="2024-09-28", end="now", timeframe="1H", m
 #endregion
 
 # DISCOVERY
+
 #get parameters of method
 vbt.IF.list_locations() #lists categories
 vbt.IF.list_indicators(pattern="vbt") #all in category vbt
 vbt.IF.list_indicators("*sma")
 vbt.phelp(vbt.indicator("talib:MOM").run)
 
-
-
-#endregion
 
 # DATA/WRAPPER
 
@@ -122,20 +157,22 @@ t1data = t1data.transform(lambda df: df.between_time('09:30', '16:00').dropna())
 resampler_s = vbt.Resampler(target_data.index, source_data.index, source_freq="1T", target_freq="1s")
 basic_data.resample(resampler_s)
 
-#endregion
 
 # REALIGN
 
-#REALIGN method - runs on data object (OHLCV) - (open feature realigns leftbound, rest of features rightboud) .resample("1T").first().ffill()
-# ffill=True = same frequency as t1data.index
-# ffill=False = keeps original frequency but moved to where data are available ie. instead of 15:30 to 15:44 for 15T bar
-t15data_realigned = t15data.realign(t1data.index, ffill=True, freq="1T") #freq - target frequency
+`REALIGN` method - runs on data object (OHLCV) - (open feature realigns leftbound, rest of features rightboud) .resample("1T").first().ffill()
 
-#REALIGN_CLOSING accessors
+```python
+ffill=True = same frequency as t1data.index
+ffill=False = keeps original frequency but moved to where data are available ie. instead of 15:30 to 15:44 for 15T bar
+t15data_realigned = t15data.realign(t1data.index, ffill=True, freq="1T") #freq - target frequency
+```
+
+## REALIGN_CLOSING accessors
+```python
 t15data_realigned_close = t15data.close.vbt.realign_closing(t1data.index, ffill=True, freq="1T")
 t15data_realigned_open = t15data.open.vbt.realign_open(t1data.index, ffill=True, freq="1T")
-
-
+```
 
 #realign_closing accessor just calls
 #return self.realign(*args, source_rbound=False, target_rbound=False, **kwargs)
@@ -147,9 +184,9 @@ t15data_realigned_open = t15data.open.vbt.realign_open(t1data.index, ffill=True,
 resampler_s = vbt.Resampler(t15data.index, t1data.index, source_freq="1T", target_freq="1s")
 t15close_realigned_with_resampler = t1data.data["BAC"].realign_closing(resampler_s)
 
-#endregion
 
-# #SIGNALS
+# SIGNALS
+```python
 cond1 = data.get("Low") < bb.lowerband
 #comparing with previous value
 cond2 = bandwidth > bandwidth.shift(1)
@@ -157,8 +194,10 @@ cond2 = bandwidth > bandwidth.shift(1)
 cond2 = bandwidth > bandwidth.vbt.ago("7d")
 mask = cond1 & cond2
 mask.sum()
+```
 
-#ENTRIES/EXITS time based
+## ENTRIES/EXITS time based
+```python
 #create entries/exits based on open of first symbol
 entries = pd.DataFrame.vbt.signals.empty_like(data.open.iloc[:,0]) 
 
@@ -181,11 +220,12 @@ exits.vbt.set(
     indexer_method="ffill",  # this time or before
     inplace=True
 )
+```
 
 
+## STOPS
+[doc from_signal](http://5.161.179.223:8000/vbt-doc/api/portfolio/base/#vectorbtpro.portfolio.base.Portfolio.from_signals) 
 
-#STOPS
-#doc from_signal http://5.161.179.223:8000/vbt-doc/api/portfolio/base/#vectorbtpro.portfolio.base.Portfolio.from_signals
 - StopExitPrice (Which price to use when exiting a position upon a stop signal?)
 - StopEntryPrice (Which price to use as an initial stop price?)
                   
@@ -193,18 +233,18 @@ price = close.vbt.wrapper.fill()
 price[entries] = entry_price
 price[exits] = exit_price
 
-#OHLCSTX modul - exit signal generator based on price and stop values
-#http://5.161.179.223:8000/vbt-doc/api/signals/generators/ohlcstx/index.html
+## OHLCSTX modul
+ - exit signal generator based on price and stop values
+[doc](ttp://5.161.179.223:8000/vbt-doc/api/signals/generators/ohlcstx/index.html)
+
+
+## WINDOW OPEN/CLOSE
 
 
 
 
-#WINDOW OPEN/CLOSE
-
-
-
-
-#END OF DAY EXITS
+## END OF DAY EXITS
+```python
 sr = t1data.data["BAC"]
 last_n_daily_rows = sr.groupby(sr.index.date).tail(4) #or N last rows
 second_last_daily_row = sr.groupby(sr.index.date).nth(-2) #or Nth last row
@@ -224,15 +264,18 @@ exits.vbt.set(
     inplace=True
 )
 
-#endregion
+```
 
 # DF/SR ACCESSORS 
 
-## GENERIC - for common taks -  http://5.161.179.223:8000/vbt-doc/api/generic/accessors/index.html#vectorbtpro.generic.accessors.GenericAccessor
+## Generic
+- for common taks ([docs](http://5.161.179.223:8000/vbt-doc/api/generic/accessors/index.html#vectorbtpro.generic.accessors.GenericAccessor)) 
 
-#ROLLING_APPLY - runs custom function over a rolling window of a fixed size (number of bars or frequency)
-#EXPANDING_APPLY - runs custome function over expanding the window from the start of the data to the current poin
+ `rolling_apply` - runs custom function over a rolling window of a fixed size (number of bars or frequency)
 
+`expanding_apply` - runs custome function over expanding the window from the start of the data to the current poin
+
+```python
 from numba import njit
 mean_nb = njit(lambda a: np.nanmean(a))
 hourly_anchored_expanding_mean = t1data.close.vbt.rolling_apply("1H", mean_nb) #ROLLING to FREQENCY or with fixed windows rolling_apply(10,mean_nb)
@@ -240,11 +283,14 @@ t1data.ohlcv.data["BAC"].lw.plot(right=[(t1data.close,"close"),(hourly_anchored_
 #NOTE for anchored "1D" frequency - it measures timedelta that means requires 1 day between reseting (16:00 end of market, 9:30 start - not a full day, so it is enOugh to set 7H)
 
 df['a'].vbt.overlay_with_heatmap(df['b']).show()
+```
 
-##SIGNAL ACCESSORS - http://5.161.179.223:8000/vbt-doc/api/signals/accessors/#vectorbtpro.signals.accessors.SignalsAccessor
+## SIGNAL ACCESSORS
+- http://5.161.179.223:8000/vbt-doc/api/signals/accessors/#vectorbtpro.signals.accessors.SignalsAccessor
 
 
-#RANKING - partitioning
+## RANKING - partitioning
+```python
 #pos_rank -1 when False, 0, 1 ... for consecutive Trues, allow_gaps defautlne False
 # sample_mask = pd.Series([True, True, False, True, True])
 ranked = sample_mask.vbt.signals.pos_rank()
@@ -265,10 +311,12 @@ entries.vbt.signals.total_partitions
 #partition_pos_rank - all members of each partition have the same rank
 ranked = sample_mask.vbt.signals.partition_pos_rank(allow_gaps=True) #0,0,-1,1,1
 ranked == 1 # the whole second partition
+```
 
+## Base Accessors
+* low level accessors - http://5.161.179.223:8000/vbt-doc/api/base/accessors/index.html#vectorbtpro.base.accessors.BaseAccessor
 
-##BASE ACCESSORS -low level accessors - http://5.161.179.223:8000/vbt-doc/api/base/accessors/index.html#vectorbtpro.base.accessors.BaseAccessor
-
+```python
 exits.vbt.set(
     True, 
     every="W-MON", 
@@ -276,23 +324,25 @@ exits.vbt.set(
     indexer_method="ffill",  # this time or before
     inplace=True
 )
+```
 
+# Stoploss/Takeprofit
+[doc StopOrders](http://5.161.179.223:8000/vbt-doc/documentation/portfolio/from-signals/index.html#stop-orders)
 
-#endregion
-
-# STOPLOSS/TAKEPROFIT
-
-#doc StopOrders http://5.161.179.223:8000/vbt-doc/documentation/portfolio/from-signals/index.html#stop-orders
-
-#SL - ATR based
+## SL - ATR based
+```
 atr = data.run("atr").atr
 pf = vbt.Portfolio.from_signals(
     data,
     entries=entries,
     sl_stop=atr / sub_data.close
 )
+```
 
-#EXIT after time http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#from-signals
+## EXIT after time
+using [from signals](http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#from-signals)
+
+```python
 f = vbt.PF.from_signals(..., td_stop="7 days")  
 pf = vbt.PF.from_signals(..., td_stop=pd.Timedelta(days=7))
 pf = vbt.PF.from_signals(..., td_stop=td_arr) 
@@ -304,43 +354,41 @@ pf = vbt.PF.from_signals(  #exit last bar before
     dt_stop="16:00", 
     arg_config=dict(dt_stop=dict(last_before=True))
 )
+```
 
-#CALLBACKS - 
-"""
- - a signal function (signal_func_nb)
+## CALLBACKS - 
+  - a signal function (`signal_func_nb`)
     - can dynamically generate signals (True, True, False,False)
     - runs at beginning of bar
- - an adjustment function (adjust_func_nb) 
+ - an adjustment function (`adjust_func_nb`) - [doc](http://5.161.179.223:8000/vbt-doc/documentation/portfolio/from-signals/#adjustment)
     - runs only if signal function above was not provided, but entry,exit arrays
-    - runs before default signal function ls_signal_func_nb http://5.161.179.223:8000/vbt-doc/api/portfolio/nb/from_signals/index.html#vectorbtpro.portfolio.nb.from_signals.ls_signal_func_nb
+    - runs before default signal function [ls_signal_func_nb](http://5.161.179.223:8000/vbt-doc/api/portfolio/nb/from_signals/index.html#vectorbtpro.portfolio.nb.from_signals.ls_signal_func_nb)
         - can change pending limit orders etc.
- - a post-signal function (post_signal_func_nb)
- - post-segment function (post_segment_func_nb)
+ - a post-signal function (`post_signal_func_nb`)
+ - post-segment function (`post_segment_func_nb`)
 
-all of them are accessing SignalContext (c) as named tuple http://5.161.179.223:8000/vbt-doc/api/portfolio/enums/index.html#vectorbtpro.portfolio.enums.SignalContext
-SignalContaxt (contains various metrics)
-   - last_limit_info - 1D with latest limit order per column
-    - order_counts
-    - last_return ...
+all of them are accessing [SignalContext](http://5.161.179.223:8000/vbt-doc/api/portfolio/enums/index.html#vectorbtpro.portfolio.enums.SignalContext) `(c)` as named tuple 
+SignalContaxt (contains various metrics) such as:
+* last_limit_info - 1D with latest limit order per column
+* order_counts
+* last_return ...
     
 """
 
-#MEMORY http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks
-#save an information piece at one timestamp and re-use at a later timestamp
+### MEMORY
+save an information piece at one timestamp and re-use at a later timestamp when using [callbacks memory](http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks)
+
+Usecases:
+* [MULTIPLE simultaneuos LIMIT ORDERS at TIME](http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks)
+
+* [IGNORE ENTRIES number of DAYS after losing trade](http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks) - signal function 
 
 
-#MULTIPLE LIMIT ORDERS at TIME http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks
-
-#IGNORE ENTRIES number of DAYS after losing trade - signal function http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks
-
-#adjust_func_nb http://5.161.179.223:8000/vbt-doc/documentation/portfolio/from-signals/#adjustment
-
-
-#endregion
 
 
 # INDICATORS DEV
 
+```python
 #REGISTER CUSTOM INDICATOR
 vbt.IndicatorFactory.register_custom_indicator(
     SupportResistance,
@@ -362,11 +410,12 @@ WMA = vbt.IF(
 
 wma = WMA.run(t1data.close, window=10)
 wma.wma
+```
 
-
-#endregion
 
 # FAV INDICATORS 
+
+```python
 #for TALIB indicator always use skipna=True
 
 #TALIB INDICATORS can do realing closing : timeframe=["1T"]
@@ -409,10 +458,11 @@ mom = vbt.indicator("talib:MOM").run(t1data.data["BAC"].close, timeperiod=10, sk
 #macd = vbt.indicator("talib:MACD").run(t1data.data["BAC"].close) #, timeframe=["1T"]) #, 
 t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
 
-#endregion
+```
 
 # GROUPING - SPLITTING
 
+```python
 #SPLITTER - splitting wrapper based on index
 #http://5.161.179.223:8000/vbt-doc/tutorials/cross-validation/splitter/index.html#anchored
 daily_splitter = vbt.Splitter.from_grouper(t1data.index, "D", split=None) #DOES contain last DAY
@@ -454,12 +504,13 @@ for name, indices in daily_grouper.iter_groups():
 #PANDAS GROUPING - series/df grouping resulting in GroupBySeries placeholder that can be aggregated(sum, mean), transformed iterated over or fitlered
 for name, group in t1data.data["BAC"].close.groupby(pd.Grouper(freq='D')):
     print(name, group)
+```
 
-
-#endregion
 
 # CHARTING
+Using [custom lightweight-charts-python](https://github.com/drew2323/lightweight-charts-python)
 
+```python
 #LW df/sr accessor
 t1data.ohlcv.data["BAC"].lw.plot(left=[(mom_multi, "mom_multi")]) #OHLCV with indicators on top
 
@@ -495,35 +546,29 @@ pane1 = Panel(
 pane2 = Panel(....)
 
 ch = chart([pane1, pane2], size="s")
+```
 
-
-#endregion
 
 # MULTIACCOUNT
-#simultaneous LONG and short (hedging)
-#VBT: One position requires one column of data, so hedging is possible by using two columns representing the same asset but different directions,
-# then stack both portfolio together (http://5.161.179.223:8000/vbt-doc/features/productivity/#column-stacking)
+Simultaneous LONG and short (hedging)
+In vbt position requires one column of data, so hedging is possible by using two columns representing the same asset but different directions,
+then stack both portfolio together [column stacking](http://5.161.179.223:8000/vbt-doc/features/productivity/#column-stacking)
 pf_join = vbt.PF.column_stack((pf1, pf2), group_by=True)
-
-
-#endregion
 
 # CUSTOM SIMULATION
 
-
-
-#endregion
-
-
 # ANALYSIS
-#ROBUSTNESS
+## ROBUSTNESS
+```python
 pf_stats.sort_values(by='Sharpe Ratio', ascending=False).iloc[::-1].vbt.heatmap().show() #works when there are more metrics
+```
 
 
 #endregion
 
 # UTILS
 
+```python
 #MEMORY
 sr.info()
 
@@ -556,5 +601,4 @@ print(vbt.timeit(my_pipeline))
 #numba doesnt return error when indexing out of bound, this raises the error
 import os
 os.environ["NUMBA_BOUNDSCHECK"] = "1"
-
-#endregion
+```
