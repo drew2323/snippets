@@ -46,7 +46,7 @@ if not hasattr(pd.DataFrame, 'lw'):
 ```
 
 
-# FETCHING DATA
+# FETCHING DATA  
  #fetching from remote db
 from lib.db import Connection
 SYMBOL = "BAC"
