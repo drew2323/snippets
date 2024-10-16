@@ -9,7 +9,7 @@
 - [SIGNALS](#signals)
   - [ENTRIES/EXITS time based](#entriesexits-time-based)
   - [STOPS](#stops)
-  - [OHLCSTX modul](#ohlcstx-modul)
+  - [OHLCSTX module](#ohlcstx-module)
   - [WINDOW OPEN/CLOSE](#window-openclose)
   - [END OF DAY EXITS](#end-of-day-exits)
 - [DF/SR ACCESSORS](#dfsr-accessors)
@@ -31,6 +31,7 @@
 - [ANALYSIS](#analysis)
   - [ROBUSTNESS](#robustness)
 - [UTILS](#utils)
+- [Market calendar](#market-calendar)
 
 
 ```python
@@ -47,6 +48,7 @@ if not hasattr(pd.DataFrame, 'lw'):
 
 
 # FETCHING DATA  
+```python
  #fetching from remote db
 from lib.db import Connection
 SYMBOL = "BAC"
@@ -60,16 +62,17 @@ basic_data = con.pull(symbols=[SYMBOL], schema=SCHEMA,start="2024-08-01", end="2
 #Fetching from YAHOO
 symbols = ["AAPL", "MSFT", "AMZN", "TSLA", "AMD", "NVDA", "SPY", "QQQ", "META", "GOOG"]
 data = vbt.YFData.pull(symbols, start="2024-09-28", end="now", timeframe="1H", missing_columns="nan")
-
-#endregion
+```
 
 # DISCOVERY
 
+```python
 #get parameters of method
 vbt.IF.list_locations() #lists categories
 vbt.IF.list_indicators(pattern="vbt") #all in category vbt
 vbt.IF.list_indicators("*sma")
 vbt.phelp(vbt.indicator("talib:MOM").run)
+```
 
 
 # DATA/WRAPPER
@@ -233,7 +236,7 @@ price = close.vbt.wrapper.fill()
 price[entries] = entry_price
 price[exits] = exit_price
 
-## OHLCSTX modul
+## OHLCSTX module
  - exit signal generator based on price and stop values
 [doc](ttp://5.161.179.223:8000/vbt-doc/api/signals/generators/ohlcstx/index.html)
 
@@ -601,4 +604,16 @@ print(vbt.timeit(my_pipeline))
 #numba doesnt return error when indexing out of bound, this raises the error
 import os
 os.environ["NUMBA_BOUNDSCHECK"] = "1"
+```
+
+# Market calendar
+
+```python
+from pandas.tseries.offsets import CustomBusinessDay
+from pandas_market_calendars import get_calendar
+
+# Get the NYSE trading calendar
+nyse = get_calendar('NYSE')
+# Create a CustomBusinessDay object using the NYSE trading calendar
+custom_bd = CustomBusinessDay(holidays=nyse.holidays().holidays, weekmask=nyse.weekmask, calendar=nyse)
 ```
