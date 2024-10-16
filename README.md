@@ -1,3 +1,3 @@
 # snippets
 A collection of reusable code snippets 
-* vbtpro [vbt-snippets.MD](vbt-snippets.MD)
+* vbtpro [vbt-snippets.md](vbt-snippets.md)
