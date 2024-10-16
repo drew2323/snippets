@@ -1,7 +1,15 @@
 import vectorbtpro as vbt
 from lightweight_charts import Panel, chart, PlotDFAccessor, PlotSRAccessor
+t15data = None
 
-#region DATA
+if not hasattr(pd.Series, 'lw'):
+    pd.api.extensions.register_series_accessor("lw")(PlotSRAccessor)
+
+if not hasattr(pd.DataFrame, 'lw'):
+    pd.api.extensions.register_dataframe_accessor("lw")(PlotDFAccessor)
+
+
+#region FETCHING DATA
  #fetching from remote db
 from lib.db import Connection
 SYMBOL = "BAC"
@@ -10,6 +18,12 @@ DB = "market_data"
 
 con = Connection(db_name=DB, default_schema=SCHEMA, create_db=True)
 basic_data = con.pull(symbols=[SYMBOL], schema=SCHEMA,start="2024-08-01", end="2024-08-08", tz_convert='America/New_York')
+
+
+#Fetching from YAHOO
+symbols = ["AAPL", "MSFT", "AMZN", "TSLA", "AMD", "NVDA", "SPY", "QQQ", "META", "GOOG"]
+data = vbt.YFData.pull(symbols, start="2024-09-28", end="now", timeframe="1H", missing_columns="nan")
+
 #endregion
 
 #region DISCOVERY
@@ -23,7 +37,50 @@ vbt.phelp(vbt.indicator("talib:MOM").run)
 
 #endregion
 
+#region DATA/WRAPPER
+
+#DATA - methods http://5.161.179.223:8000/vbt-doc/api/data/base/index.html#vectorbtpro.data.base.Data
+#main data container (servees as a wrapper for symbol oriented or feature oriented data)
+data.transform()
+data.dropna()
+data.feature_oriented vs data.symbol_oriented #returns True/False if cols are features or symbols
+data.data #dictionary either feature oriented or
+data.ohlcv #OHLCV mixin filters only ohlcv feature and offers methods http://5.161.179.223:8000/vbt-doc/api/data/base/index.html#vectorbtpro.data.base.OHLCDataMixin
+data.base #base mixin - implicit offers functions wrapper methods  http://5.161.179.223:8000/vbt-doc/api/data/base/index.html#vectorbtpro.data.base.BaseDataMixin
+    - data.symbol_wrapper
+    - data.feature_wrapper
+    - data.features
+
+
+show(t1data.data["BAC"])
+
+#display returns on top of ohlcv
+t1data.ohlcv.data["BAC"].lw.plot(left=[(t1data.returns, "returns")], precision=4)
+
+
+#create WRAPPER manually
+#wrapper - for avail methods http://5.161.179.223:8000/vbt-doc/api/base/wrapping/index.html#vectorbtpro.base.wrapping.ArrayWrapper
+
+
+#create wrapper from existing objects
+wrapper = data.symbol_wrapper # one column for each symbol
+wrapper = data.get_symbol_wrapper() # symbol - level, one column for each symbol  (BAC a pod tim series)
+wrapper = data.get_feature_wrapper() #feature level, one column for each feature (open,high...)
+wrapper = df.vbt.wrapper
+
+#Create an empty array with the same shape, index, and columns as in another array
+new_float_df = wrapper.fill(np.nan)  
+new_bool_df = wrapper.fill(False)  
+new_int_df = wrapper.fill(-1)  
+
+#display df/series
+from itables import show
+show(t1data.close)
+
+#endregion
+
 #region RESAMPLING
+#config
 from vectorbtpro.utils.config import merge_dicts, Config, HybridConfig
 from vectorbtpro import _typing as tp
 from vectorbtpro.generic import nb as generic_nb
@@ -53,18 +110,77 @@ _feature_config: tp.ClassVar[Config] = HybridConfig(
 
 basic_data._feature_config = _feature_config
 
+#1s to 1T
 t1data = basic_data[['open', 'high', 'low', 'close', 'volume','vwap','buyvolume','trades','sellvolume']].resample("1T")
 t1data = t1data.transform(lambda df: df.between_time('09:30', '16:00').dropna())
 
-#realign closing
-resampler_s = vbt.Resampler(t1data.index, s1data.index, source_freq="1T", target_freq="1s")
-t1close_realigned = t1data.data["BAC"].close.vbt.realign_closing(resampler_s)
-
-
+#using resampler (with more control over target index)
+resampler_s = vbt.Resampler(target_data.index, source_data.index, source_freq="1T", target_freq="1s")
+basic_data.resample(resampler_s)
 
 #endregion
 
-#region ENTRIES/EXITS
+#region REALIGN
+
+#REALIGN method - runs on data object (OHLCV) - (open feature realigns leftbound, rest of features rightboud) .resample("1T").first().ffill()
+# ffill=True = same frequency as t1data.index
+# ffill=False = keeps original frequency but moved to where data are available ie. instead of 15:30 to 15:44 for 15T bar
+t15data_realigned = t15data.realign(t1data.index, ffill=True, freq="1T") #freq - target frequency
+
+#REALIGN_CLOSING accessors
+t15data_realigned_close = t15data.close.vbt.realign_closing(t1data.index, ffill=True, freq="1T")
+t15data_realigned_open = t15data.open.vbt.realign_open(t1data.index, ffill=True, freq="1T")
+
+
+
+#realign_closing accessor just calls
+#return self.realign(*args, source_rbound=False, target_rbound=False, **kwargs)
+#realign opening
+#return self.realign(*args, source_rbound=True, target_rbound=True, **kwargs)
+
+#using RESAMPLER
+#or
+resampler_s = vbt.Resampler(t15data.index, t1data.index, source_freq="1T", target_freq="1s")
+t15close_realigned_with_resampler = t1data.data["BAC"].realign_closing(resampler_s)
+
+#endregion
+
+#region #SIGNALS
+cond1 = data.get("Low") < bb.lowerband
+#comparing with previous value
+cond2 = bandwidth > bandwidth.shift(1)
+#comparing with value week ago  
+cond2 = bandwidth > bandwidth.vbt.ago("7d")
+mask = cond1 & cond2
+mask.sum()
+
+#ENTRIES/EXITS time based
+#create entries/exits based on open of first symbol
+entries = pd.DataFrame.vbt.signals.empty_like(data.open.iloc[:,0]) 
+
+#create entries/exits based on symbol level
+symbol_wrapper = data.get_symbol_wrapper()
+entries = symbol_wrapper.fill(False)
+exits = symbol_wrapper.fill(False)
+
+entries.vbt.set(
+    True, 
+    every="W-MON", 
+    at_time="00:00:00",
+    indexer_method="bfill",  # this time or after
+    inplace=True
+)
+exits.vbt.set(
+    True, 
+    every="W-MON", 
+    at_time="23:59:59", 
+    indexer_method="ffill",  # this time or before
+    inplace=True
+)
+
+
+
+#STOPS
 #doc from_signal http://5.161.179.223:8000/vbt-doc/api/portfolio/base/#vectorbtpro.portfolio.base.Portfolio.from_signals
 - StopExitPrice (Which price to use when exiting a position upon a stop signal?)
 - StopEntryPrice (Which price to use as an initial stop price?)
@@ -73,17 +189,90 @@ price = close.vbt.wrapper.fill()
 price[entries] = entry_price
 price[exits] = exit_price
 
+#OHLCSTX modul - exit signal generator based on price and stop values
+#http://5.161.179.223:8000/vbt-doc/api/signals/generators/ohlcstx/index.html
 
-# window open/close 
+
+
+
+#WINDOW OPEN/CLOSE
+
+
 
 
 #END OF DAY EXITS
-# end_of_day_dates = index.to_series().resample("1d").last().values
-# exit_signals.loc[end_of_day_dates] = True
-end_of_day_dates = open_hours_index.to_series().resample("1d").last()
-df['exit'][df['exit'].index.isin(end_of_day_dates)] = True
-# This index should be probably open_hours_index
-# But also check that end_of_day_dates doesn't have nans (NaT), and if it has, you need to filter them out (edited)
+sr = t1data.data["BAC"]
+last_n_daily_rows = sr.groupby(sr.index.date).tail(4) #or N last rows
+second_last_daily_row = sr.groupby(sr.index.date).nth(-2) #or Nth last row
+second_last_two_rows = sr.groupby(sr.index.date).apply(lambda x: x.iloc[-3:-1]).droplevel(0) #or any slice of rows
+#create exit array
+exits = t1data.get_symbol_wrapper().fill(False)
+exits.loc[last_n_daily_rows.index] = True
+#visualize
+t1data.ohlcv.data["BAC"].lw.plot(right=[(t1data.close,"close",exits)], size="s")
+
+#REGULAR EXITS -EVERY HOUR/D/WEEK exits
+exits.vbt.set(
+    True, 
+    every="H" # "min" "2min" "2H" "W-MON"+at time "D"+time
+    #at_time="23:59:59", 
+    indexer_method="ffill",  # this time or before
+    inplace=True
+)
+
+#endregion
+
+#region DF/SR ACCESSORS 
+
+## GENERIC - for common taks -  http://5.161.179.223:8000/vbt-doc/api/generic/accessors/index.html#vectorbtpro.generic.accessors.GenericAccessor
+
+#ROLLING_APPLY - runs custom function over a rolling window of a fixed size (number of bars or frequency)
+#EXPANDING_APPLY - runs custome function over expanding the window from the start of the data to the current poin
+
+from numba import njit
+mean_nb = njit(lambda a: np.nanmean(a))
+hourly_anchored_expanding_mean = t1data.close.vbt.rolling_apply("1H", mean_nb) #ROLLING to FREQENCY or with fixed windows rolling_apply(10,mean_nb)
+t1data.ohlcv.data["BAC"].lw.plot(right=[(t1data.close,"close"),(hourly_anchored_expanding_mean, "hourly_anchored_expanding_mean")], size="s")
+#NOTE for anchored "1D" frequency - it measures timedelta that means requires 1 day between reseting (16:00 end of market, 9:30 start - not a full day, so it is enOugh to set 7H)
+
+df['a'].vbt.overlay_with_heatmap(df['b']).show()
+
+##SIGNAL ACCESSORS - http://5.161.179.223:8000/vbt-doc/api/signals/accessors/#vectorbtpro.signals.accessors.SignalsAccessor
+
+
+#RANKING - partitioning
+#pos_rank -1 when False, 0, 1 ... for consecutive Trues, allow_gaps defautlne False
+# sample_mask = pd.Series([True, True, False, True, True])
+ranked = sample_mask.vbt.signals.pos_rank()
+ranked == 1 #select each second signal in each partition
+ranked = sample_mask.vbt.signals.pos_rank(allow_gaps=True)
+(ranked > -1) & (ranked % 2 == 1) #Select each second signal globally
+
+entries.vbt.signals.first() #selects only first entries in each group
+entries.vbt.signals.from_nth(n) # pos_rank >= n in each group, all from Nth
+
+#AFTER - with variants _after which resets partition each reset array
+#maximum number of exit signals after each entry signal
+exits.vbt.signals.pos_rank_after(entries, reset_wait=0).max() + 1 #Count is the maximum rank plus one since ranks start with zero. We also assume that an entry signal comes before an exit signal if both are at the same timestamp by passing reset_wait=0.
+
+entries.vbt.signals.total_partitions
+
+
+#partition_pos_rank - all members of each partition have the same rank
+ranked = sample_mask.vbt.signals.partition_pos_rank(allow_gaps=True) #0,0,-1,1,1
+ranked == 1 # the whole second partition
+
+
+##BASE ACCESSORS -low level accessors - http://5.161.179.223:8000/vbt-doc/api/base/accessors/index.html#vectorbtpro.base.accessors.BaseAccessor
+
+exits.vbt.set(
+    True, 
+    every="W-MON", 
+    at_time="23:59:59", 
+    indexer_method="ffill",  # this time or before
+    inplace=True
+)
+
 
 #endregion
 
@@ -172,7 +361,6 @@ wma.wma
 
 
 #endregion
-
 
 #region FAV INDICATORS 
 #for TALIB indicator always use skipna=True
@@ -327,5 +515,42 @@ pf_join = vbt.PF.column_stack((pf1, pf2), group_by=True)
 #ROBUSTNESS
 pf_stats.sort_values(by='Sharpe Ratio', ascending=False).iloc[::-1].vbt.heatmap().show() #works when there are more metrics
 
+
+#endregion
+
+#region UTILS
+
+#MEMORY
+sr.info()
+
+
+#peak memory usage, running once
+with vbt.MemTracer() as tracer:
+    my_pipeline()
+
+print(tracer.peak_usage())
+
+#CACHE
+vbt.print_cache_stats()  
+vbt.print_cache_stats(vbt.PF) 
+
+vbt.flush() #clear cache and collect garbage
+vbt.clear_cache(pf) #of specific
+
+
+#TIMING
+#running once
+with vbt.Timer() as timer:
+    my_pipeline()
+
+print(timer.elapsed())
+
+#multiple times
+print(vbt.timeit(my_pipeline))
+
+#NUMBA
+#numba doesnt return error when indexing out of bound, this raises the error
+import os
+os.environ["NUMBA_BOUNDSCHECK"] = "1"
 
 #endregion
