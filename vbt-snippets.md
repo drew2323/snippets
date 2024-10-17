@@ -239,8 +239,9 @@ mask.sum()
 ```python
 #create entries/exits based on open of first symbol
 entries = pd.DataFrame.vbt.signals.empty_like(data.open.iloc[:,0]) 
+exits = pd.DataFrame.vbt.signals.empty_like(entries)
 
-#create entries/exits based on symbol level
+#OR create entries/exits based on symbol level if needed (for each columns)
 symbol_wrapper = data.get_symbol_wrapper()
 entries = symbol_wrapper.fill(False)
 exits = symbol_wrapper.fill(False)
@@ -260,7 +261,6 @@ exits.vbt.set(
     inplace=True
 )
 ```
-
 
 ## STOPS
 [doc from_signal](http://5.161.179.223:8000/vbt-doc/api/portfolio/base/#vectorbtpro.portfolio.base.Portfolio.from_signals) 
@@ -315,6 +315,10 @@ exits = t1data.get_symbol_wrapper().fill(False)
 exits.loc[last_n_daily_rows.index] = True
 #visualize
 t1data.ohlcv.data["BAC"].lw.plot(right=[(t1data.close,"close",exits)], size="s")
+
+#which is ALTERNATIVE to
+exits = create_mask_from_window(t1data.close, 387, 390, use_cal=False)
+t1data.ohlcv.data["BAC"].lw.plot(right=[(t1data.close,"close",exits)], size="s")
 ```
 ## REGULAR EXITS
 Time based.
@@ -333,11 +337,11 @@ exits.vbt.set(
 # DF/SR ACCESSORS 
 
 ## Generic
-- for common taks ([docs](http://5.161.179.223:8000/vbt-doc/api/generic/accessors/index.html#vectorbtpro.generic.accessors.GenericAccessor)) 
+For common taks ([docs](http://5.161.179.223:8000/vbt-doc/api/generic/accessors/index.html#vectorbtpro.generic.accessors.GenericAccessor)) 
 
- `rolling_apply` - runs custom function over a rolling window of a fixed size (number of bars or frequency)
+*  `rolling_apply` - runs custom function over a rolling window of a fixed size (number of bars or frequency)
 
-`expanding_apply` - runs custome function over expanding the window from the start of the data to the current poin
+* `expanding_apply` - runs custome function over expanding the window from the start of the data to the current poin
 
 ```python
 from numba import njit
@@ -346,6 +350,7 @@ hourly_anchored_expanding_mean = t1data.close.vbt.rolling_apply("1H", mean_nb) #
 t1data.ohlcv.data["BAC"].lw.plot(right=[(t1data.close,"close"),(hourly_anchored_expanding_mean, "hourly_anchored_expanding_mean")], size="s")
 #NOTE for anchored "1D" frequency - it measures timedelta that means requires 1 day between reseting (16:00 end of market, 9:30 start - not a full day, so it is enOugh to set 7H)
 
+#HEATMAP OVERLAY
 df['a'].vbt.overlay_with_heatmap(df['b']).show()
 ```
 
@@ -529,6 +534,7 @@ t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
 ```python
 #SPLITTER - splitting wrapper based on index
 #http://5.161.179.223:8000/vbt-doc/tutorials/cross-validation/splitter/index.html#anchored
+#based on GROUPER
 daily_splitter = vbt.Splitter.from_grouper(t1data.index, "D", split=None) #DOES contain last DAY
 
 daily_splitter = vbt.Splitter.from_ranges( #doesnt contain last DY
@@ -539,6 +545,9 @@ daily_splitter = vbt.Splitter.from_ranges( #doesnt contain last DY
 daily_splitter.stats()
 daily_splitter.plot()
 daily_splitter.coverage()
+daily_splitter.get_bounds(index_bounds=True) #shows the exact times
+daily_splitter.get_bounds_arr()
+daily_splitter.get_range_coverage(relative=True)
 
 #TAKING and APPLY MANUALLY - run UDF on ALL takes and concatenates
 taken = daily_splitter.take(t1data)
