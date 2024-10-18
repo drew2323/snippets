@@ -117,6 +117,8 @@ testData = testData.transform(lambda x: x.reindex(market_klines))
 ## indexing
 ```python
 entries.vbt.xloc[slice("2024-08-01","2024-08-03")].obj.info()
+
+data.xloc[slice("9:30","10:00")] #targeting only morning rush
 ```
 
 ## Data manipulation
@@ -634,13 +636,15 @@ vbt.IF.register_custom_indicator(vwap_ind)
 
 ```python
 from ttools.vbtindicators import register_custom_inds
-register_custom_inds("skip") #register all, skip or override when exists
-#register_custom_inds("CVWAP", "skip") #register one
+register_custom_inds(if_exists="skip") #register all, skip or override when exists
+#register_custom_inds("CVWAP", "skip") #register one, skip if exists
 #register_custom_inds() #deregister all
 vbt.IF.list_indicators("ttools")
 
 vwap_cum = vbt.indicator("ttools:CUVWAP").run(s12_data.high, s12_data.low, s12_data.close, s12_data.volume, anchor="D")
 vwap_cum.vwap
+
+div_vwap_cum = vbt.indicator("ttools:DIVERGENCE").run(s12_data.close, vwap_cum_d.vwap, divtype=vbt.Default(valeu="reln"), hide_default=True) #hide default levels
 
 ```
 
