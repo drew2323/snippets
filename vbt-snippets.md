@@ -31,6 +31,7 @@
   - [Custom ind](#custom-ind)
     - [register custom ind](#register-custom-ind)
     - [VWAP anchored example](#vwap-anchored-example)
+    - [Use ttols indicators](#use-ttols-indicators)
 - [FAV INDICATORS](#fav-indicators)
 - [GROUPING](#grouping)
 - [SPLITTING](#splitting)
@@ -629,7 +630,19 @@ vwap_ind = vbt.IF(
 %timeit vwap_cum = vwap_ind.run(s12_data.high, s12_data.low, s12_data.close, s12_data.volume, anchor="min")
 vbt.IF.register_custom_indicator(vwap_ind) 
 ```
+### Use ttols indicators
 
+```python
+from ttools.vbtindicators import register_custom_inds
+register_custom_inds("skip") #register all, skip or override when exists
+#register_custom_inds("CVWAP", "skip") #register one
+#register_custom_inds() #deregister all
+vbt.IF.list_indicators("ttools")
+
+vwap_cum = vbt.indicator("ttools:CUVWAP").run(s12_data.high, s12_data.low, s12_data.close, s12_data.volume, anchor="D")
+vwap_cum.vwap
+
+```
 
 # FAV INDICATORS 
 
@@ -817,6 +830,11 @@ pf_stats.sort_values(by='Sharpe Ratio', ascending=False).iloc[::-1].vbt.heatmap(
 # UTILS
 
 ```python
+
+#RELOAD module in ipynb
+%load_ext autoreload
+%autoreload 2
+
 #MEMORY
 sr.info()
 
