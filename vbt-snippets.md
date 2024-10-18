@@ -1,6 +1,7 @@
 - [FETCHING DATA](#fetching-data)
   - [REINDEX to main session](#reindex-to-main-session)
   - [indexing](#indexing)
+  - [Data manipulation](#data-manipulation)
 - [DISCOVERY](#discovery)
 - [DATA/WRAPPER](#datawrapper)
   - [create WRAPPER manually](#create-wrapper-manually)
@@ -25,9 +26,14 @@
   - [EXIT after time](#exit-after-time)
   - [CALLBACKS -](#callbacks--)
     - [MEMORY](#memory)
+- [Portfolio](#portfolio)
 - [INDICATORS DEV](#indicators-dev)
+  - [Custom ind](#custom-ind)
+    - [register custom ind](#register-custom-ind)
+    - [VWAP anchored example](#vwap-anchored-example)
 - [FAV INDICATORS](#fav-indicators)
-- [GROUPING - SPLITTING](#grouping---splitting)
+- [GROUPING](#grouping)
+- [SPLITTING](#splitting)
 - [CHARTING](#charting)
 - [MULTIACCOUNT](#multiaccount)
 - [CUSTOM SIMULATION](#custom-simulation)
@@ -66,6 +72,17 @@ basic_data = con.pull(symbols=[SYMBOL], schema=SCHEMA,start="2024-08-01", end="2
 symbols = ["AAPL", "MSFT", "AMZN", "TSLA", "AMD", "NVDA", "SPY", "QQQ", "META", "GOOG"]
 data = vbt.YFData.pull(symbols, start="2024-09-28", end="now", timeframe="1H", missing_columns="nan")
 
+
+#Fetching from local cache
+dir = DATA_DIR + "/notebooks/"
+import os
+files = [f for f in os.listdir(dir) if f.endswith(".parquet")]
+print('\n'.join(map(str, files)))
+file_name = "ohlcv_df-BAC-2024-10-03T09:30:00-2024-10-16T16:00:00-['4', '7', 'B', 'C', 'F', 'O', 'P', 'U', 'V', 'W', 'Z']-100.parquet"
+ohlcv_df = pd.read_parquet(dir+file_name,engine='pyarrow')
+basic_data = vbt.Data.from_data(vbt.symbol_dict({"BAC": ohlcv_df}), tz_convert=zoneNY)
+basic_data.wrapper.index.normalize().nunique() #numdays
+
 #Fetching Trades and Aggregating custom OHLCV
 TBD
 ```
@@ -99,6 +116,16 @@ testData = testData.transform(lambda x: x.reindex(market_klines))
 ## indexing
 ```python
 entries.vbt.xloc[slice("2024-08-01","2024-08-03")].obj.info()
+```
+
+## Data manipulation
+
+```python
+#add/rename/delete symbols
+s12_data = s12_data.rename_symbols("BAC", "BAC-LONG")
+s12_data = s12_data.add_symbol("BAC-SHORT", s12_data.data["BAC-LONG"])
+s12_adata.symbols
+s12_data = s12_data.remove_symbols(["BAC-SHORT"])
 ```
 # DISCOVERY
 
@@ -452,7 +479,9 @@ Usecases:
 
 * [IGNORE ENTRIES number of DAYS after losing trade](http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks) - signal function 
 
+# Portfolio
 
+group_by=True to put all columns to the same group and cash_sharing=True to share capital among them
 
 
 # INDICATORS DEV
@@ -479,6 +508,126 @@ WMA = vbt.IF(
 
 wma = WMA.run(t1data.close, window=10)
 wma.wma
+```
+## Custom ind
+
+```python
+#simple
+from numba import jit
+@jit
+def apply_func(high, low, close):
+    return (high + low + close + close) / 4
+
+HLCC4 = vbt.IF(
+    class_name='hlcc4',
+    input_names=['high', 'low', 'close'],
+    output_names=['out']
+).with_apply_func(
+    apply_func,
+    timeperiod=10, #single default
+    high=vbt.Ref('close')) #default from another input)
+
+ind = HLCC4.run(s12_data.high, s12_data.low, s12_data.close)
+
+#1D apply function
+import talib
+
+def apply_func_1d(close, timeperiod):
+    return talib.SMA(close.astype(np.double), timeperiod)
+
+SMA = vbt.IF(
+    input_names=['ts'],
+    param_names=['timeperiod'],
+    output_names=['sma']
+).with_apply_func(apply_func_1d, takes_1d=True)
+
+sma = SMA.run(ts, [3, 4])
+sma.sma
+
+#with grouping and keep_pd (inputs are pd.series)
+def apply_func(ts, group_by):
+    return ts.vbt.demean(group_by=group_by)
+
+Demeaner = vbt.IF(
+    input_names=['ts'],
+    param_names=['group_by'],
+    output_names=['out']
+).with_apply_func(apply_func, keep_pd=True) #if takes_1D it sends pd.series, otherwise df with symbol as columns
+
+ts_wide = pd.DataFrame({
+    'a': [1, 2, 3, 4, 5],
+    'b': [5, 4, 3, 2, 1],
+    'c': [3, 2, 1, 2, 3],
+    'd': [1, 2, 3, 2, 1]
+}, index=generate_index(5))
+demeaner = Demeaner.run(ts_wide, group_by=[(0, 0, 1, 1), True])
+demeaner.out
+```
+### register custom ind
+[indicator registration](http://5.161.179.223:8000/vbt-doc/cookbook/indicators/#registration)
+
+```python
+vbt.IF.register_custom_indicator(sma_indicator) #name=classname
+vbt.IF.register_custom_indicator(sma_indicator, "rolling:SMA")
+
+vbt.IF.deregister_custom_indicator("rolling:SMA")
+```
+### VWAP anchored example
+
+```python
+import numpy as np
+from vectorbtpro import _typing as tp
+from vectorbtpro.base.wrapping import ArrayWrapper
+from vectorbtpro.utils.template import RepFunc
+
+def substitute_anchor(wrapper: ArrayWrapper, anchor: tp.Optional[tp.FrequencyLike]) -> tp.Array1d:
+    """Substitute reset frequency by group lens. It is array of number of elements of each group."""
+    if anchor is None:
+        return np.array([wrapper.shape[0]])
+    return wrapper.get_index_grouper(anchor).get_group_lens()
+
+@jit(nopython=True)
+def vwap_cum(high, low, close, volume, group_lens):
+    #anchor based grouping - prepare group indexes
+    group_end_idxs = np.cumsum(group_lens)
+    group_start_idxs = group_end_idxs - group_lens
+
+    #prepare output
+    out = np.full(volume.shape, np.nan, dtype=np.float_)
+
+    hlcc4 = (high + low + close + close) / 4
+
+    #iterate over groups
+    for group in range(len(group_lens)):
+        from_i = group_start_idxs[group]
+        to_i = group_end_idxs[group]
+        nom_cumsum = 0
+        denum_cumsum = 0
+        #for each group do this (it is just np.cumsum(hlcc4 * volume) / np.sum(volume) iteratively)
+        for i in range(from_i, to_i):
+            nom_cumsum += volume[i] * hlcc4[i]
+            denum_cumsum += volume[i]
+            if denum_cumsum == 0:
+                out[i] = np.nan
+            else:
+                out[i] = nom_cumsum / denum_cumsum
+    return out
+
+vwap_ind = vbt.IF(
+    class_name='CUVWAP',
+    input_names=['high', 'low', 'close', 'volume'],
+    param_names=['anchor'],
+    output_names=['vwap']
+).with_apply_func(vwap_cum,
+                takes_1d=True,
+                param_settings=dict(
+                    anchor=dict(template=RepFunc(substitute_anchor)),
+                ),
+                anchor="D",
+                )
+
+%timeit vwap_cum = vwap_ind.run(s12_data.high, s12_data.low, s12_data.close, s12_data.volume, anchor="min")
+vbt.IF.register_custom_indicator(vwap_ind) 
 ```
 
 
@@ -529,7 +678,33 @@ t1data.ohlcv.data["BAC"].lw.plot(auto_scale=[mom_anch_d, mom])
 
 ```
 
-# GROUPING - SPLITTING
+# GROUPING
+
+Group wrapper index based on freq:
+
+```python
+#returns array of number of elements in each consec group
+group_lens = s12_data.wrapper.get_index_grouper("D").get_group_lens()
+#
+group_end_idxs = np.cumsum(group_lens) #end indices of each group
+group_start_idxs = group_end_idxs - group_lens #start indices of each group
+
+out = np.full(volume.shape, np.nan, dtype=np.float_)
+
+#iterate over groups
+for group in range(len(group_lens)):
+    from_i = group_start_idxs[group]
+    to_i = group_end_idxs[group]
+
+    #iterate over elements of the group
+    for i in range(from_i, to_i):
+        out[i] = np.nan
+return out
+
+```
+
+
+# SPLITTING
 
 ```python
 #SPLITTER - splitting wrapper based on index
@@ -669,6 +844,11 @@ print(timer.elapsed())
 
 #multiple times
 print(vbt.timeit(my_pipeline))
+
+#in notebook
+%timeit function(x)
+%% time
+function(x)
 
 #NUMBA
 #numba doesnt return error when indexing out of bound, this raises the error
