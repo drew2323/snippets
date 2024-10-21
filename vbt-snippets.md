@@ -10,6 +10,7 @@
 - [REALIGN](#realign)
   - [REALIGN\_CLOSING accessors](#realign_closing-accessors)
 - [SIGNALS](#signals)
+  - [Comparing](#comparing)
   - [ENTRIES/EXITS time based](#entriesexits-time-based)
   - [STOPS](#stops)
   - [OHLCSTX Module](#ohlcstx-module)
@@ -255,13 +256,33 @@ t15close_realigned_with_resampler = t1data.data["BAC"].realign_closing(resampler
 
 
 # SIGNALS
+## Comparing
 ```python
+dvla = np.round(div_vwap_lin_angle.real,4) #ROUNDING to 4 decimals
+
+long_entries = tts.isrisingc(dvla,3).vbt & div_vwap_cum.div_below(0) #strictly rising for 3 bars
+short_entries = tts.isfalling(dvla,3).vbt & div_vwap_cum.div_above(0) #strictly falling for 3 bars
+long_entries = tts.isrising(dvla,3)#rising for 3 bars including equal values
+short_entries = tts.isfalling(dvla,3)#falling for 3 bars including equal values
+
 cond1 = data.get("Low") < bb.lowerband
 #comparing with previous value
 cond2 = bandwidth > bandwidth.shift(1)
 #comparing with value week ago  
 cond2 = bandwidth > bandwidth.vbt.ago("7d")
 mask = cond1 & cond2
+mask.sum()
+
+#creating
+bandwidth = (bb.upperband - bb.lowerband) / bb.middleband
+mask = bandwidth.vbt > vbt.Param([0.15, 0.3], name="threshold")  #broadcasts and create combinations (for scalar params only)
+
+#same but for arrays
+mask = bandwidth.vbt.combine(
+    [0.15, 0.3],  #values elements (scalars or array)
+    combine_func=np.greater, 
+    keys=pd.Index([0.15, 0.3], name="threshold")  #keys for the multiindex
+)
 mask.sum()
 ```
 
