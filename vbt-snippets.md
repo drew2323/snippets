@@ -31,16 +31,20 @@
   - [CALLBACKS -](#callbacks--)
     - [MEMORY](#memory)
 - [Portfolio](#portfolio)
-  - [delta format](#delta-format)
+  - [from signals](#from-signals)
   - [CALLBACKS](#callbacks)
-  - [Staticization](#staticization)
+    - [Access running total return from sim](#access-running-total-return-from-sim)
+    - [Staticization](#staticization)
+  - [Grouping](#grouping)
+- [Portfolio analysis](#portfolio-analysis)
+  - [Changing year freq for stocks](#changing-year-freq-for-stocks)
 - [INDICATORS DEV](#indicators-dev)
   - [Custom ind](#custom-ind)
     - [register custom ind](#register-custom-ind)
     - [VWAP anchored example](#vwap-anchored-example)
     - [Use ttols indicators](#use-ttols-indicators)
 - [FAV INDICATORS](#fav-indicators)
-- [GROUPING](#grouping)
+- [GROUPING](#grouping-1)
 - [SPLITTING](#splitting)
 - [CHARTING](#charting)
 - [MULTIACCOUNT](#multiaccount)
@@ -629,6 +633,7 @@ Usecases:
 # Portfolio
 
 group_by=True to put all columns to the same group and cash_sharing=True to share capital among them
+## from signals
 
 ```python
 pf = vbt.Portfolio.from_signals(
@@ -637,6 +642,8 @@ pf = vbt.Portfolio.from_signals(
     exits=long_exits,
     short_entries=short_entries_cln,
     short_exits=short_exits,
+    size=1, 
+    size_type=vbt.pf_enums.SizeType.Amount # Value, Percent, TargetAmount
     sl_stop=0.3,
     tp_stop = 0.4,
     delta_format = vbt.pf_enums.DeltaFormat.Percent100, #(Absolute, Percent, Percent100, Target)
@@ -644,15 +651,11 @@ pf = vbt.Portfolio.from_signals(
     freq="12s") #sl_stop=sl_stop, tp_stop = sl_stop,, tsl_stop
 ```
 
-## delta format
+[SizeType enums](http://5.161.179.223:8000/vbt-doc/api/portfolio/enums/index.html#vectorbtpro.portfolio.enums.SizeType)
 
-```python
-vbt.pf_enums.DeltaFormat:
-    Absolute: int = 0
-    Percent: int = 1
-    Percent100: int = 2
-    Target: int = 3
-```
+[DeltaFormat enums](http://5.161.179.223:8000/vbt-doc/api/portfolio/enums/index.html#vectorbtpro.portfolio.enums.DeltaFormat)
+
+[Other PF enums](http://5.161.179.223:8000/vbt-doc/api/portfolio/enums/index.html)
 
 ## CALLBACKS
 
@@ -668,57 +671,100 @@ Importan SignalContact attributes:
 Callback functions:
 - signal_func_nb - place/alter entries/exits
 - adjust_sl_func_nb - adjust SL at each time stamp
+- adjust_func_nb - adjust size 
+- post_segment_func_nb
+
+More on callbacks in [cookbook](http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks).
 
 For exit dependent entries, the entries can be preprocessed in `signal_func_nb` see [callbacks](http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks) in cookbok or [signal function](http://5.161.179.223:8000/vbt-doc/documentation/portfolio/from-signals/index.html#signal-function)in doc
 
 ```python
-#@njit
-def signal_func_nb(c, entries, exits, short_entries, short_exits, cooldown):
+@njit
+def signal_func_nb(c, entries, exits, short_entries, short_exits, cooldown_time, cooldown_bars):
     entry = vbt.pf_nb.select_nb(c, entries) #get current value
     exit = vbt.pf_nb.select_nb(c, exits)
     short_entry = vbt.pf_nb.select_nb(c, short_entries)
     short_exit = vbt.pf_nb.select_nb(c, short_exits)
     if not vbt.pf_nb.in_position_nb(c): # short for c.last_position == 0
         if vbt.pf_nb.has_orders_nb(c):  
-            if c.last_pos_info[c.col]["pnl"] < 0:  #positive pnl on last reade
-                last_exit_idx = c.last_pos_info[c.col]["exit_idx"]  #exit_idx
-                if c.index[c.i] - c.index[last_exit_idx] < cooldown:
-                    return False, exit, False, short_exit #disable all entries
+            if c.last_pos_info[c.col]["pnl"] < 0:  #current index is c.i
+                last_exit_idx = c.last_pos_info[c.col]["exit_idx"] # exit index from last_pos_info named tuple
+                if cooldown_time is not None and c.index[c.i] - c.index[last_exit_idx] < cooldown_time:
+                    return False, exit, False, short_exit #disable entry
+                elif cooldown_bars is not None and last_exit_idx + cooldown_bars > c.i:
+                    return False, exit, False, short_exit #disable entry
     return entry, exit, short_entry, short_exit
 
-"""
-c.last_pos_info[c.col] 
-   - is namedtuple {'names': ['id', 'col', 'size', 'entry_order_id', 'entry_idx', 'entry_price', 'entry_fees', 'exit_order_id', 'exit_idx', 'exit_price', 'exit_fees', 'pnl', 'return', 'direction', 'status', 'parent_id']
-"""                                    
-                                      
+cooldown_time = vbt.dt.to_ns(vbt.timedelta("1m"))
+cooldown_bars = 3
+
 pf = vbt.Portfolio.from_signals(
     close=s12_data.close,
     entries=long_entries_cln,
     exits=long_exits,
     short_entries=short_entries_cln,
     short_exits=short_exits,
-    signal_func_nb=signal_func_nb,
+    signal_func_nb="signal_func_nb.py",
     signal_args=(
         vbt.Rep("entries"), 
         vbt.Rep("exits"),
         vbt.Rep("short_entries"),
         vbt.Rep("short_exits"),
-        vbt.dt.to_ns(vbt.timedelta("12s"))*5  # any timedelta, 12s meaning bars - TODO bar count
+        cooldown_time, # cooldown in timedelta in ns after exit
+        cooldown_bars  #cooldown in number of bars after exit
     ),
     sl_stop=0.3,
     tp_stop = 0.4,
     delta_format = vbt.pf_enums.DeltaFormat.Percent100, #(Absolute, Percent, Percent100, Target)
     fees=0.0167/100,
     freq="12s",
-    jitted=False,
-    statiticized=True) #sl_stop=sl_stop, tp_stop = sl_stop,, tsl_stop
-
+    #staticized=True
+    #jitted=False
+    ) #sl_stop=sl_stop, tp_stop = sl_stop,, tsl_stop
 ```
 
 Tips:  
 - To avoid waiting for the compilation, remove the `@njit` decorator from `signal_func_nb` and pass `jitted=False` to from_signals in order to disable Numba
 
-## Staticization
+### Access running total return from sim
+
+create an empty array for cumulative returns and populate it inside the post_segment_func_nb callback. The same array accessed by other callbacks can be used to get the total return at any time step.
+
+```python
+@njit
+def adjust_func_nb(c, cum_return):
+    if c.cash_sharing:
+        total_return = cum_return[c.group] - 1
+    else:
+        total_return = cum_return[c.col] - 1
+    ...  
+
+@njit
+def post_segment_func_nb(c, cum_return):
+    if c.cash_sharing:
+        cum_return[c.group] *= 1 + c.last_return[c.group]
+    else:
+        for col in range(c.from_col, c.to_col):
+            cum_return[col] *= 1 + c.last_return[col]
+
+cum_return = None
+def init_cum_return(wrapper):
+    global cum_return
+    if cum_return is None:
+        cum_return = np.full(wrapper.shape_2d[1], 1.0)
+    return cum_return
+
+pf = vbt.PF.from_signals(
+    ...,
+    adjust_func_nb=adjust_func_nb,
+    adjust_args=(vbt.RepFunc(init_cum_return),),
+    post_segment_func_nb=post_segment_func_nb,
+    post_segment_args=(vbt.RepFunc(init_cum_return),),
+)
+
+```
+
+### Staticization
 Callbacks make function uncacheable, 
 to overcome that
 - define the callback in external file `signal_func_nb.py`
@@ -746,6 +792,28 @@ pf = vbt.PF.from_signals(
     staticized=True  
 )
 ```
+
+## Grouping
+
+Grouping in [signal function](http://5.161.179.223:8000/vbt-doc/documentation/portfolio/from-signals/index.html#signal-function).
+
+# Portfolio analysis
+
+```
+pf.orders.readable
+pf.entry_trades.readable
+pf.exit_trades.readable
+pf.trades.readable
+pf.positions.readable
+pf.trade_history
+```
+
+## Changing year freq for stocks
+
+```python
+vbt.settings.returns.year_freq = pd.Timedelta(hours=6.5) * 252 
+```
+
 # INDICATORS DEV
 
 ```python
@@ -1114,6 +1182,7 @@ vbt.print_cache_stats(vbt.PF)
 
 vbt.flush() #clear cache and collect garbage
 vbt.clear_cache(pf) #of specific
+vbt.clear_pycache()
 
 
 #TIMING
