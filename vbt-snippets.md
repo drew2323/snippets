@@ -1,3 +1,4 @@
+- [DEBUGGING](#debugging)
 - [FETCHING DATA](#fetching-data)
   - [REINDEX to main session](#reindex-to-main-session)
   - [indexing](#indexing)
@@ -11,6 +12,8 @@
   - [REALIGN\_CLOSING accessors](#realign_closing-accessors)
 - [SIGNALS](#signals)
   - [Comparing](#comparing)
+  - [GENERATE SIGNALS IRERATIVELY (numba)](#generate-signals-ireratively-numba)
+  - [or as indicators](#or-as-indicators)
   - [ENTRIES/EXITS time based](#entriesexits-time-based)
   - [STOPS](#stops)
   - [OHLCSTX Module](#ohlcstx-module)
@@ -28,6 +31,9 @@
   - [CALLBACKS -](#callbacks--)
     - [MEMORY](#memory)
 - [Portfolio](#portfolio)
+  - [delta format](#delta-format)
+  - [CALLBACKS](#callbacks)
+  - [Staticization](#staticization)
 - [INDICATORS DEV](#indicators-dev)
   - [Custom ind](#custom-ind)
     - [register custom ind](#register-custom-ind)
@@ -55,6 +61,27 @@ if not hasattr(pd.Series, 'lw'):
 
 if not hasattr(pd.DataFrame, 'lw'):
     pd.api.extensions.register_dataframe_accessor("lw")(PlotDFAccessor)
+```
+
+# DEBUGGING
+prints which arguments are being passed to apply_func.
+
+```python
+def apply_func(*args, **kwargs):
+    for i, arg in enumerate(args):
+        print("arg {}: {}".format(i, type(arg)))
+    for k, v in kwargs.items():
+        print("kwarg {}: {}".format(k, type(v)))
+    raise NotImplementedError
+
+RollCov = vbt.IF(
+    class_name='RollCov',
+    input_names=['ts1', 'ts2'],
+    param_names=['w'],
+    output_names=['rollcov'],
+).with_apply_func(apply_func, select_params=False)
+
+ollCov.run(ts1, ts2, [2, 3], some_arg="some_value")
 ```
 
 
@@ -286,6 +313,102 @@ mask = bandwidth.vbt.combine(
 mask.sum()
 ```
 
+## GENERATE SIGNALS IRERATIVELY (numba)
+
+Used for 1D. For multiple symbol create own indicator instead.
+```python
+@njit  
+def generate_mask_1d_nb(  #required arrays as inputs
+    high, low,  
+    uband, mband, lband,  
+    cond2_th, cond4_th  
+):
+    out = np.full(high.shape, False)  
+    
+    for i in range(high.shape[0]):  
+        
+        bandwidth = (uband[i] - lband[i]) / mband[i]
+        cond1 = low[i] < lband[i]
+        cond2 = bandwidth > cond2_th
+        cond3 = high[i] > uband[i]
+        cond4 = bandwidth < cond4_th
+        signal = (cond1 and cond2) or (cond3 and cond4)  
+        out[i] = signal  
+        
+    return out
+
+mask = generate_mask_1d_nb(
+    data.get("High")["BTCUSDT"].values,  
+    data.get("Low")["BTCUSDT"].values,
+    bb.upperband["BTCUSDT"].values,
+    bb.middleband["BTCUSDT"].values,
+    bb.lowerband["BTCUSDT"].values,
+    0.30,
+    0.15
+)
+symbol_wrapper = data.get_symbol_wrapper()
+mask = symbol_wrapper["BTCUSDT"].wrap(mask)  
+mask.sum()
+```
+
+or create extra numba function to iterate over columns
+
+```python
+@njit
+def generate_mask_nb(  
+    high, low,
+    uband, mband, lband,
+    cond2_th, cond4_th
+):
+    out = np.empty(high.shape, dtype=np.bool_)  
+    
+    for col in range(high.shape[1]):  
+        out[:, col] = generate_mask_1d_nb(  
+            high[:, col], low[:, col],
+            uband[:, col], mband[:, col], lband[:, col],
+            cond2_th, cond4_th
+        )
+        
+    return out
+
+mask = generate_mask_nb(
+    vbt.to_2d_array(data.get("High")),  
+    vbt.to_2d_array(data.get("Low")),
+    vbt.to_2d_array(bb.upperband),
+    vbt.to_2d_array(bb.middleband),
+    vbt.to_2d_array(bb.lowerband),
+    0.30,
+    0.15
+)
+mask = symbol_wrapper.wrap(mask)
+mask.sum()
+```
+
+
+## or as indicators
+
+Works on columns.
+
+```python
+MaskGenerator = vbt.IF(  
+    input_names=["high", "low", "uband", "mband", "lband"],
+    param_names=["cond2_th", "cond4_th"],
+    output_names=["mask"]
+).with_apply_func(generate_mask_1d_nb, takes_1d=True)  
+mask_generator = MaskGenerator.run(  
+    data.get("High"),
+    data.get("Low"),
+    bb.upperband,
+    bb.middleband,
+    bb.lowerband,
+    [0.3, 0.4],
+    [0.1, 0.2],
+    param_product=True  
+)
+mask_generator.mask.sum()
+```
+
+
 ## ENTRIES/EXITS time based
 ```python
 #create entries/exits based on open of first symbol
@@ -507,7 +630,122 @@ Usecases:
 
 group_by=True to put all columns to the same group and cash_sharing=True to share capital among them
 
+```python
+pf = vbt.Portfolio.from_signals(
+    close=s12_data.close,
+    entries=long_entries_cln,
+    exits=long_exits,
+    short_entries=short_entries_cln,
+    short_exits=short_exits,
+    sl_stop=0.3,
+    tp_stop = 0.4,
+    delta_format = vbt.pf_enums.DeltaFormat.Percent100, #(Absolute, Percent, Percent100, Target)
+    fees=0.0167/100,
+    freq="12s") #sl_stop=sl_stop, tp_stop = sl_stop,, tsl_stop
+```
 
+## delta format
+
+```python
+vbt.pf_enums.DeltaFormat:
+    Absolute: int = 0
+    Percent: int = 1
+    Percent100: int = 2
+    Target: int = 3
+```
+
+## CALLBACKS
+
+Callbacks functions can be used to place/alter entries/exits and various other things dynamically based on simulation status.
+All of them contain [SignalContext](http://5.161.179.223:8000/vbt-doc/api/portfolio/enums/#vectorbtpro.portfolio.enums.SignalContext) and also can include custom Memory.
+
+Importan SignalContact attributes:
+* `c.i` - current index
+* `c.index` - time index numpy
+* `c.last_pos_info[c.col] ` - named tuple of last position info 
+`{'names': ['id', 'col', 'size', 'entry_order_id', 'entry_idx', 'entry_price', 'entry_fees', 'exit_order_id', 'exit_idx', 'exit_price', 'exit_fees', 'pnl', 'return', 'direction', 'status', 'parent_id']`
+
+Callback functions:
+- signal_func_nb - place/alter entries/exits
+- adjust_sl_func_nb - adjust SL at each time stamp
+
+For exit dependent entries, the entries can be preprocessed in `signal_func_nb` see [callbacks](http://5.161.179.223:8000/vbt-doc/cookbook/portfolio/index.html#callbacks) in cookbok or [signal function](http://5.161.179.223:8000/vbt-doc/documentation/portfolio/from-signals/index.html#signal-function)in doc
+
+```python
+#@njit
+def signal_func_nb(c, entries, exits, short_entries, short_exits, cooldown):
+    entry = vbt.pf_nb.select_nb(c, entries) #get current value
+    exit = vbt.pf_nb.select_nb(c, exits)
+    short_entry = vbt.pf_nb.select_nb(c, short_entries)
+    short_exit = vbt.pf_nb.select_nb(c, short_exits)
+    if not vbt.pf_nb.in_position_nb(c): # short for c.last_position == 0
+        if vbt.pf_nb.has_orders_nb(c):  
+            if c.last_pos_info[c.col]["pnl"] < 0:  #positive pnl on last reade
+                last_exit_idx = c.last_pos_info[c.col]["exit_idx"]  #exit_idx
+                if c.index[c.i] - c.index[last_exit_idx] < cooldown:
+                    return False, exit, False, short_exit #disable all entries
+    return entry, exit, short_entry, short_exit
+
+"""
+c.last_pos_info[c.col] 
+   - is namedtuple {'names': ['id', 'col', 'size', 'entry_order_id', 'entry_idx', 'entry_price', 'entry_fees', 'exit_order_id', 'exit_idx', 'exit_price', 'exit_fees', 'pnl', 'return', 'direction', 'status', 'parent_id']
+"""                                    
+                                      
+pf = vbt.Portfolio.from_signals(
+    close=s12_data.close,
+    entries=long_entries_cln,
+    exits=long_exits,
+    short_entries=short_entries_cln,
+    short_exits=short_exits,
+    signal_func_nb=signal_func_nb,
+    signal_args=(
+        vbt.Rep("entries"), 
+        vbt.Rep("exits"),
+        vbt.Rep("short_entries"),
+        vbt.Rep("short_exits"),
+        vbt.dt.to_ns(vbt.timedelta("12s"))*5  # any timedelta, 12s meaning bars - TODO bar count
+    ),
+    sl_stop=0.3,
+    tp_stop = 0.4,
+    delta_format = vbt.pf_enums.DeltaFormat.Percent100, #(Absolute, Percent, Percent100, Target)
+    fees=0.0167/100,
+    freq="12s",
+    jitted=False,
+    statiticized=True) #sl_stop=sl_stop, tp_stop = sl_stop,, tsl_stop
+
+```
+
+Tips:  
+- To avoid waiting for the compilation, remove the `@njit` decorator from `signal_func_nb` and pass `jitted=False` to from_signals in order to disable Numba
+
+## Staticization
+Callbacks make function uncacheable, 
+to overcome that
+- define the callback in external file `signal_func_nb.py`
+
+```python
+@njit
+def signal_func_nb(c, fast_sma, slow_sma):  
+    long = vbt.pf_nb.iter_crossed_above_nb(c, fast_sma, slow_sma)
+    short = vbt.pf_nb.iter_crossed_below_nb(c, fast_sma, slow_sma)
+    return long, False, short, False
+```
+
+and then use use `staticized=True`
+
+```python
+data = vbt.YFData.pull("BTC-USD")
+pf = vbt.PF.from_signals(
+    data,
+    signal_func_nb="signal_func_nb.py",  
+    signal_args=(vbt.Rep("fast_sma"), vbt.Rep("slow_sma")),
+    broadcast_named_args=dict(
+        fast_sma=data.run("sma", 20, hide_params=True, unpack=True), 
+        slow_sma=data.run("sma", 50, hide_params=True, unpack=True)
+    ),
+    staticized=True  
+)
+```
 # INDICATORS DEV
 
 ```python
