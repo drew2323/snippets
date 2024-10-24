@@ -1,7 +1,7 @@
 - [DEBUGGING](#debugging)
 - [FETCHING DATA](#fetching-data)
   - [REINDEX to main session](#reindex-to-main-session)
-  - [indexing](#indexing)
+  - [Smart indexing](#smart-indexing)
   - [Data manipulation](#data-manipulation)
 - [DISCOVERY](#discovery)
 - [DATA/WRAPPER](#datawrapper)
@@ -37,7 +37,15 @@
     - [Staticization](#staticization)
   - [Grouping](#grouping)
 - [Portfolio analysis](#portfolio-analysis)
-  - [Changing year freq for stocks](#changing-year-freq-for-stocks)
+  - [pf.trades analysis](#pftrades-analysis)
+    - [PnL by hour of the day (BOXPLOT)](#pnl-by-hour-of-the-day-boxplot)
+  - [PF resampling](#pf-resampling)
+  - [PF Plotting](#pf-plotting)
+  - [Entries/exits visual analysis](#entriesexits-visual-analysis)
+  - [Configuration](#configuration)
+- [Optimalization](#optimalization)
+  - [Param configuration](#param-configuration)
+  - [Pipeline](#pipeline)
 - [INDICATORS DEV](#indicators-dev)
   - [Custom ind](#custom-ind)
     - [register custom ind](#register-custom-ind)
@@ -47,13 +55,13 @@
 - [GROUPING](#grouping-1)
 - [SPLITTING](#splitting)
 - [CHARTING](#charting)
+  - [standard vbt plot](#standard-vbt-plot)
 - [MULTIACCOUNT](#multiaccount)
 - [CUSTOM SIMULATION](#custom-simulation)
 - [ANALYSIS](#analysis)
   - [ROBUSTNESS](#robustness)
 - [UTILS](#utils)
 - [Market calendar](#market-calendar)
-
 
 ```python
 import vectorbtpro as vbt
@@ -68,6 +76,13 @@ if not hasattr(pd.DataFrame, 'lw'):
 ```
 
 # DEBUGGING
+
+```python
+vbt.pprint(pf.entry_trades) #pretty print of instance
+vbt.pdir(pf.entry_trades) #available methods/properties
+vbt.phelp(ollcov.run) #input/output attribnuttes of the method
+```
+
 prints which arguments are being passed to apply_func.
 
 ```python
@@ -146,10 +161,12 @@ testData = vbt.YFData.fetch(['MSFT'], start=start, end=end, timeframe=timeframe,
 # of market hours)
 testData = testData.transform(lambda x: x.reindex(market_klines))
 ```
-## indexing
+## Smart indexing
 ```python
+signal.vbt.xloc["04-26-2024":"04-29-2024"].get() #pdseries or df timeindex
+signal.vbt.xloc[("BAC", "04-26-2024"):("BAC","04-29-2024")].get() #multiindex
+entries.vbt.xloc["04-16-2024"].get() #one day
 entries.vbt.xloc[slice("2024-08-01","2024-08-03")].obj.info()
-
 data.xloc[slice("9:30","10:00")] #targeting only morning rush
 ```
 
@@ -644,6 +661,7 @@ pf = vbt.Portfolio.from_signals(
     short_exits=short_exits,
     size=1, 
     size_type=vbt.pf_enums.SizeType.Amount # Value, Percent, TargetAmount
+    price="nextopen" #where the fill is happening. Default is "close" of current bar, can be also  multiparameter vbt.Param(["close", "nextopen"]) 
     sl_stop=0.3,
     tp_stop = 0.4,
     delta_format = vbt.pf_enums.DeltaFormat.Percent100, #(Absolute, Percent, Percent100, Target)
@@ -700,6 +718,7 @@ cooldown_bars = 3
 
 pf = vbt.Portfolio.from_signals(
     close=s12_data.close,
+    bm_close=data.data["SPY"].close, #explicit benchmark used in pf, ie. pf.plot_cum_returns().show()
     entries=long_entries_cln,
     exits=long_exits,
     short_entries=short_entries_cln,
@@ -799,19 +818,202 @@ Grouping in [signal function](http://5.161.179.223:8000/vbt-doc/documentation/po
 
 # Portfolio analysis
 
-```
+[Portfolio base doc](http://5.161.179.223:8000/vbt-doc/api/portfolio/base/)
+
+```python
 pf.orders.readable
 pf.entry_trades.readable
 pf.exit_trades.readable
 pf.trades.readable
 pf.positions.readable
-pf.trade_history
-```
+pf.trade_history #human readable df expanding trades with metrics
 
-## Changing year freq for stocks
+dd = pf.get_drawdowns().records_readable
+dd[dd["Status"] == "Active"] #Recovered
+pf.metrics #get available metrics and its short names&function 
+
+#trades
+vbt.pdir(pf.trades) # available methods/properties
+
+#orders
+pf.orders.side_buy.count() # pf.order.attribute_value.COUNT()
+pf.orders.stats(group_by=True)
+
+#daily returns
+pf.daily_returns.sort_values([(2, 'BAC')], ascending=True) #sorting values in levels
+pf.daily_returns.sort_values(pf.daily_returns.columns[0], ascending=True) #same with first level
+pf.daily_returns.cumsum()
+```
+## pf.trades analysis
+[pf.trades.plot()](http://5.161.179.223:8000/vbt-doc/api/portfolio/trades/#vectorbtpro.portfolio.trades.Trades.plot) doc - various options.
 
 ```python
+fig = pf.trades.plot()
+fig.auto_rangebreaks()
+fig.show()
+
+df = pf.trades.readable
+```
+```python
+df["Direction"].value_counts() #count of trades for each Direction
+df.groupby("Direction")["PnL"].sum() #sum of pnl for each Direction (Short vs Long) .vbt.barplot() -to plot
+
+#daily PnL
+df.groupby(df['Exit Index'].dt.date)['PnL'].sum().sort_index(ascending=False) #daily PnL
+
+#daily PnL for each Direction
+df.groupby([df['Exit Index'].dt.date, 'Direction'])['PnL'].sum().sort_index(ascending=False) #daily PnL for each Direction
+#same but unstack, wehere long/short values become columns - for better charting
+df = df.groupby([df['Exit Index'].dt.date, 'Direction'])['PnL'].sum().sort_index(ascending=False).unstack()
+#df.vbt.barplot() or
+df.plot(kind="bar", stacked=True)
+
+
+#hourly PnL for each Direction, by Exit
+df = df.groupby([df['Exit Index'].dt.hour, 'Direction'])['PnL'].sum().sort_index(ascending=False).unstack()
+#df.vbt.barplot()
+df.plot(kind="bar", stacked=True)
+```
+
+```python
+#PnL by Day of the Week and Direction
+# Group by day of the week and direction, then sum PnL
+pnl_by_day_and_direction_week = df.groupby([df['Exit Index'].dt.day_name(), 'Direction'])['PnL'].sum().unstack()
+fig = pnl_by_day_and_direction_week.vbt.barplot()
+fig.update_layout(
+    barmode='stack',  # Stack/group/overlay/relative the bars
+    title='Profit by Day of the Week and Direction',
+    xaxis_title='Day of the Week',
+    yaxis_title='Cumulative Profit'
+)
+```
+
+### PnL by hour of the day (BOXPLOT)
+![alt text](image.png)
+```python
+a = df.groupby([df['Exit Index'].dt.day_name(), df['Exit Index'].dt.hour])['PnL'].sum().unstack()
+fig = a.vbt.boxplot()
+fig.update_layout(
+    #barmode='stack',  # Stack/group/overlay/relative the bars
+    title='Profit by hour of the day',
+    xaxis_title='Hour of the day',
+    yaxis_title='Cumulative Profit'
+)
+```
+
+
+```python
+##Profit/Loss (PnL) vs. Trade Duration
+# Calculate trade duration in minutes
+df['Trade Duration'] = (df['Exit Index'] - df['Entry Index']).dt.total_seconds() / 60
+
+# Scatter plot of PnL vs Trade Duration
+plt.style.use('dark_background')
+colors = {'Short': 'lightcyan', 'Long': 'yellow'}
+plt.scatter(df['Trade Duration'], df['PnL'], c=df['Direction'].map(colors))
+
+# Adding labels and title
+plt.title('Trade Duration vs. Profit/Loss')
+plt.xlabel('Duration (Minutes)')
+plt.ylabel('Profit/Loss')
+
+# Create a legend
+handles = [plt.Line2D([0], [0], marker='o', color='w', label='Short', markerfacecolor='lightcyan', markersize=10),
+           plt.Line2D([0], [0], marker='o', color='w', label='Long', markerfacecolor='yellow', markersize=10)]
+plt.legend(title='Type', handles=handles)
+
+plt.tight_layout()
+plt.show()
+
+##Cumulative profits vs benchmark
+pf.plot_cum_returns().show()
+
+
+```
+## PF resampling
+```python
+monthly_returns = pf.returns_acc.resample("M").get() 
+daily_returns = pf.resample("D").returns #alternative
+fig = monthly_returns.vbt.boxplot() #box plot of monthly returns
+fig = monthly_returns.vbt.heatmap()   #heatmap of time vs  monthly returns 
+fig = monthly_returns.vbt.ts_heatmap() #heatmap of  returns vs time
+
+```
+
+## PF Plotting
+```python
+pf.plot_trade_signals().show() #plot long short entries/exits
+pf.plot_cum_returns().show() #cum returns vs benchmark
+
+##whether returns are distirbuted normally
+pf.returns.vbt.qqplot()
+
+#TRADES
+pf.trades.plot_mae_returns().show()#MAE/MFE - identify max loss/profit during the trade
+pf.trades.plot_expanding_mfe_returns().show() #expanding mea/mfe returns
+```
+[Plot Edge ratio](http://5.161.179.223:8000/static/js/vbt/features/analysis/index.html#edge-ratio) `pf.trades.plot_running_edge_ratio()`
+
+## Entries/exits visual analysis
+
+```python
+#display entry exits for visual analysis
+import ttools as tts
+trade_entries, trade_exits = tts.trades2entries_exits(pf) #helper to extract info from trades and orders with texts to markers (notext=True can be used)
+
+Panel(
+    ohlcv=(s12_data.ohlcv.data["BAC"],),
+    right=[(s12_data.close, "close", trade_entries, trade_exits)],
+    middle1=[(pf.returns.cumsum(), "returns")],
+    ).chart(precision=4)
+
+#or alternative display just markers with no text
+trade_entries = pd.Series(index=pf.trades.readable["Entry Index"], dtype=bool, data=True)
+trade_exits = pd.Series(index=pf.trades.readable["Exit Index"], dtype=bool, data=True)
+#then call Panel same as above
+```
+
+## Configuration
+Changing year freq for stocks
+```python
 vbt.settings.returns.year_freq = pd.Timedelta(hours=6.5) * 252 
+```
+
+# Optimalization
+
+## Param configuration
+
+```python
+tp_stop = vbt.Param(tp_stop, condition="tp_stop > sl_stop") #conditional hyper parameters
+```
+```python
+tp_stop = vbt.Param(tp_stop, condition="tp_stop > sl_stop") #conditional hyper parameters
+```
+## Pipeline
+```python
+bt.parameterized(merge_func="concat")  
+def sma_crossover_perf(data, fast_window, slow_window):
+    fast_sma = data.run("sma", fast_window, short_name="fast_sma")  
+    slow_sma = data.run("sma", slow_window, short_name="slow_sma")
+    entries = fast_sma.real_crossed_above(slow_sma)
+    exits = fast_sma.real_crossed_below(slow_sma)
+    pf = vbt.Portfolio.from_signals(
+        data, entries, exits, direction="both")  
+    return pf.sharpe_ratio
+
+#Let's test a grid of fast_window and slow_window combinations on one year of that data:
+
+perf = sma_crossover_perf(  
+    data["2020":"2020"],  
+    vbt.Param(np.arange(5, 50), condition="x < slow_window"),  
+    vbt.Param(np.arange(5, 50)),  
+    _execute_kwargs=dict(  
+        show_progress=True,
+        clear_cache=50,  
+        collect_garbage=50
+    )
+)
+perf
 ```
 
 # INDICATORS DEV
@@ -1138,6 +1340,26 @@ pane1 = Panel(
 pane2 = Panel(....)
 
 ch = chart([pane1, pane2], size="s")
+```
+
+## standard vbt plot
+
+```python
+#skip gaps automatically
+vbt.settings.plotting.auto_rangebreaks = True
+vbt.settings.set_theme("dark")
+
+data.plot(symbol="SPY", yaxis=dict(type="log")).show()
+
+#skip non-business hours and weekends
+fig = df.vbt.plot()
+fig.update_xaxes(
+    rangebreaks=[
+        dict(bounds=['sat', 'mon']),
+        dict(bounds=[16, 9.5], pattern='hour'),
+        
+    ]
+)
 ```
 
 
