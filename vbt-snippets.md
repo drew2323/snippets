@@ -132,7 +132,35 @@ basic_data = vbt.Data.from_data(vbt.symbol_dict({"BAC": ohlcv_df}), tz_convert=z
 basic_data.wrapper.index.normalize().nunique() #numdays
 
 #Fetching Trades and Aggregating custom OHLCV
-TBD
+from ttools import load_data
+#This is how to call LOAD function
+symbol = ["SPY", "BAC"]
+#datetime in zoneNY 
+day_start = datetime(2024, 1, 15, 9, 30, 0)
+day_stop = datetime(2024, 10, 20, 16, 0, 0)
+day_start = zoneNY.localize(day_start)
+day_stop = zoneNY.localize(day_stop)
+
+#requested AGG
+resolution = 1 #12s bars
+agg_type = AggType.OHLCV #other types AggType.OHLCV_VOL, AggType.OHLCV_DOL, AggType.OHLCV_RENKO
+exclude_conditions = ['C','O','4','B','7','V','P','W','U','Z','F','9','M','6'] #None to defaults
+minsize = 100 #min trade size to include
+main_session_only = False
+force_remote = False
+
+data = load_data(symbol = symbol,
+                     agg_type = agg_type,
+                     resolution = resolution,
+                     start_date = day_start,
+                     end_date = day_stop,
+                     #exclude_conditions = None,
+                     minsize = minsize,
+                     main_session_only = main_session_only,
+                     force_remote = force_remote,
+                     return_vbt = True, #returns vbt object
+                     verbose = True
+                     )
 ```
 
 ## REINDEX to main session
@@ -266,7 +294,8 @@ _feature_config: tp.ClassVar[Config] = HybridConfig(
 
 basic_data._feature_config = _feature_config
 ```
-ddd
+
+```python
 #1s to 1T
 t1data = basic_data[['open', 'high', 'low', 'close', 'volume','vwap','buyvolume','trades','sellvolume']].resample("1T")
 t1data = t1data.transform(lambda df: df.between_time('09:30', '16:00').dropna())
@@ -275,6 +304,7 @@ t1data = t1data.transform(lambda df: df.between_time('09:30', '16:00').dropna())
 resampler_s = vbt.Resampler(target_data.index, source_data.index, source_freq="1T", target_freq="1s")
 basic_data.resample(resampler_s)
 
+```
 
 # REALIGN
 
@@ -1383,6 +1413,8 @@ pf_stats.sort_values(by='Sharpe Ratio', ascending=False).iloc[::-1].vbt.heatmap(
 # UTILS
 
 ```python
+#use plotly resampler
+vbt.settings.plotting["use_resampler"] = True
 
 #RELOAD module in ipynb
 %load_ext autoreload
