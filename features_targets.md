@@ -1,5 +1,16 @@
 Here goes the target features
- 
+
+> [!note]- poznám ka
+> neco
+> neco
+
+> [!example]- Graph: voaltility averagae slope
+> ![[Pasted image 20250630140635.png]]
+
+
+> [!example]- Graph: volatility average slope across 1d to 30d range of windows
+> ![[Volatility_average_slope.png]]
+
 # Things to try
 
 TODO:
